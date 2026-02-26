@@ -1044,7 +1044,11 @@
     }
 
     window.addEventListener('resize', layoutCanvas);
-    setTimeout(layoutCanvas, 0);
+    const waitForCanvas = () => {
+      if (!game.canvas) { requestAnimationFrame(waitForCanvas); return; }
+      layoutCanvas();
+    };
+    waitForCanvas();
   </script>
 </body>
 </html>
