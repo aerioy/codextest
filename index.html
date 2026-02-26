@@ -124,6 +124,19 @@
       color: #7fa8bf;
       line-height: 1.2;
     }
+    #kickOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 56px;
+      font-weight: 800;
+      color: #a0f0ff;
+      text-shadow: 0 0 10px rgba(160, 240, 255, 0.5), 0 1px 3px rgba(0, 0, 0, 0.6);
+    }
     canvas {
       position: fixed;
       display: block;
@@ -138,6 +151,7 @@
 <body>
   <div id="game"></div>
   <svg id="pitchOverlay" viewBox="0 0 1100 650" preserveAspectRatio="none" aria-hidden="true"></svg>
+  <div id="kickOverlay"></div>
   <div id="hud">
     <div id="hudTop">
       <div id="hudScoreWrap">
@@ -312,7 +326,8 @@
           netHint: document.getElementById('hudNetHint'),
           room: document.getElementById('hudRoom'),
           inkFill: document.getElementById('hudInkFill'),
-          inkPct: document.getElementById('hudInkPct')
+          inkPct: document.getElementById('hudInkPct'),
+          kick: document.getElementById('kickOverlay')
         };
 
         this.initAudio();
@@ -881,15 +896,6 @@
         g.fillStyle(COLORS.pitch, 1);
         g.fillRoundedRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, FIELD_CORNER_RADIUS);
 
-        zg.fillStyle(COLORS.zoneLeftFill, 0.38);
-        zg.fillRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
-        zg.fillStyle(COLORS.zoneRightFill, 0.38);
-        zg.fillRoundedRect(this.rightZone.x, this.rightZone.y, this.rightZone.w, this.rightZone.h, BOOST_BLOCK_RADIUS);
-        zg.lineStyle(3, COLORS.zoneLeftEdge, 0.95);
-        zg.strokeRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
-        zg.lineStyle(3, COLORS.zoneRightEdge, 0.95);
-        zg.strokeRoundedRect(this.rightZone.x, this.rightZone.y, this.rightZone.w, this.rightZone.h, BOOST_BLOCK_RADIUS);
-
         if (this.shieldActive(now)) {
           g.fillStyle(COLORS.shieldFill, 0.36);
           g.fillCircle(GOAL_LINE_X_LEFT + SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
@@ -941,9 +947,15 @@
           }
         }
 
-        g.fillStyle(0x050a0c, 0.9); g.fillCircle(this.ballPos.x + 2.4, this.ballPos.y + 2.8, BALL_RADIUS + 1);
-        g.fillStyle(COLORS.ball, 1); g.fillCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
-        g.lineStyle(2, COLORS.ballStroke, 1); g.strokeCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
+        if (this.ballShadowSvg && this.ballMainSvg && this.ballStrokeSvg) {
+          const cx = this.ballPos.x.toFixed(2), cy = this.ballPos.y.toFixed(2);
+          this.ballShadowSvg.setAttribute('cx', (this.ballPos.x + 2.4).toFixed(2));
+          this.ballShadowSvg.setAttribute('cy', (this.ballPos.y + 2.8).toFixed(2));
+          this.ballMainSvg.setAttribute('cx', cx);
+          this.ballMainSvg.setAttribute('cy', cy);
+          this.ballStrokeSvg.setAttribute('cx', cx);
+          this.ballStrokeSvg.setAttribute('cy', cy);
+        }
 
         const myInkUsed = this.inkUsed[this.playerSide] || 0;
         const rem = clamp((MAX_INK_LENGTH - myInkUsed) / MAX_INK_LENGTH, 0, 1);
@@ -966,11 +978,13 @@
         this.hud.room.textContent = `Room ${this.net.roomCode || '-'} | ${this.net.host ? 'Host' : 'Join'}`;
 
         if (this.kickoffPhase === 'countdown') {
-          this.kickText.setText(String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now))));
-          this.kickText.setVisible(true);
+          this.hud.kick.textContent = String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now)));
         } else if (this.kickoffPhase === 'waiting_touch') {
-          this.kickText.setText('GO'); this.kickText.setVisible(true);
-        } else this.kickText.setVisible(false);
+          this.hud.kick.textContent = 'GO';
+        } else {
+          this.hud.kick.textContent = '';
+        }
+        this.kickText.setVisible(false);
 
         if (this.shieldActive(now)) {
           this.shieldText.setText(`GOAL SHIELDS ${(this.shieldEnd - now).toFixed(1)}s`);
@@ -980,6 +994,9 @@
     }
 
     const pitchOverlay = document.getElementById('pitchOverlay');
+    const leftZoneX = GOAL_LINE_X_LEFT - BOOST_BLOCK_DEPTH * 0.5;
+    const rightZoneX = GOAL_LINE_X_RIGHT - BOOST_BLOCK_DEPTH * 0.5;
+    const zoneY = GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5;
     pitchOverlay.innerHTML = `
       <defs>
         <clipPath id="pitchClip">
@@ -991,6 +1008,8 @@
           const yy = FIELD_TOP + 10 + i * 24;
           return `<line x1="${FIELD_LEFT + 16}" y1="${yy}" x2="${FIELD_RIGHT - 16}" y2="${yy}" stroke="#d9fff6" stroke-opacity="0.10" stroke-width="1" />`;
         }).join('')}
+        <rect x="${leftZoneX}" y="${zoneY}" width="${BOOST_BLOCK_DEPTH}" height="${BOOST_BLOCK_HEIGHT}" rx="${BOOST_BLOCK_RADIUS}" ry="${BOOST_BLOCK_RADIUS}" fill="#ff6e80" fill-opacity="0.38" stroke="#ff8fa1" stroke-opacity="0.95" stroke-width="3" />
+        <rect x="${rightZoneX}" y="${zoneY}" width="${BOOST_BLOCK_DEPTH}" height="${BOOST_BLOCK_HEIGHT}" rx="${BOOST_BLOCK_RADIUS}" ry="${BOOST_BLOCK_RADIUS}" fill="#5aa9ff" fill-opacity="0.38" stroke="#9bcdff" stroke-opacity="0.95" stroke-width="3" />
       </g>
       <rect x="${FIELD_LEFT + 9}" y="${FIELD_TOP + 9}" width="${(FIELD_RIGHT - FIELD_LEFT) - 18}" height="${(FIELD_BOTTOM - FIELD_TOP) - 18}" rx="${FIELD_CORNER_RADIUS - 10}" ry="${FIELD_CORNER_RADIUS - 10}" fill="none" stroke="#0e423a" stroke-width="2" />
       <rect x="${FIELD_LEFT}" y="${FIELD_TOP}" width="${FIELD_RIGHT - FIELD_LEFT}" height="${FIELD_BOTTOM - FIELD_TOP}" rx="${FIELD_CORNER_RADIUS}" ry="${FIELD_CORNER_RADIUS}" fill="none" stroke="#c8f5f0" stroke-width="3" />
@@ -1000,7 +1019,14 @@
       <rect x="${GOAL_LINE_X_RIGHT}" y="${GOAL_TOP}" width="${GOAL_DEPTH}" height="${GOAL_OPENING}" rx="8" ry="8" fill="#9aa3ad" fill-opacity="0.12" stroke="#bfc7cf" stroke-opacity="0.95" stroke-width="3" />
       <line x1="${GOAL_LINE_X_LEFT}" y1="${GOAL_TOP}" x2="${GOAL_LINE_X_LEFT}" y2="${GOAL_BOTTOM}" stroke="#bfc7cf" stroke-width="5" />
       <line x1="${GOAL_LINE_X_RIGHT}" y1="${GOAL_TOP}" x2="${GOAL_LINE_X_RIGHT}" y2="${GOAL_BOTTOM}" stroke="#bfc7cf" stroke-width="5" />
+      <circle id="ballShadowSvg" cx="${WIDTH * 0.5 + 2.4}" cy="${HEIGHT * 0.5 + 2.8}" r="${BALL_RADIUS + 1}" fill="#050a0c" fill-opacity="0.90" />
+      <circle id="ballMainSvg" cx="${WIDTH * 0.5}" cy="${HEIGHT * 0.5}" r="${BALL_RADIUS}" fill="#f5faff" />
+      <circle id="ballStrokeSvg" cx="${WIDTH * 0.5}" cy="${HEIGHT * 0.5}" r="${BALL_RADIUS}" fill="none" stroke="#142028" stroke-width="2" />
     `;
+
+    const ballShadowSvg = document.getElementById('ballShadowSvg');
+    const ballMainSvg = document.getElementById('ballMainSvg');
+    const ballStrokeSvg = document.getElementById('ballStrokeSvg');
 
     const game = new Phaser.Game({
       type: Phaser.WEBGL,
@@ -1035,6 +1061,12 @@
     const waitForCanvas = () => {
       if (!game.canvas) { requestAnimationFrame(waitForCanvas); return; }
       syncOverlayToCanvas();
+      const scene = game.scene.keys.s;
+      if (scene) {
+        scene.ballShadowSvg = ballShadowSvg;
+        scene.ballMainSvg = ballMainSvg;
+        scene.ballStrokeSvg = ballStrokeSvg;
+      }
     };
     waitForCanvas();
   </script>
