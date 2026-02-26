@@ -145,7 +145,7 @@
   <script>
     const WIDTH = 1100;
     const HEIGHT = 650;
-    const RENDER_RESOLUTION = Math.min(window.devicePixelRatio || 1, 3);
+    const RENDER_RESOLUTION = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
 
     const FIELD_LEFT = 40;
     const FIELD_RIGHT = WIDTH - 40;
@@ -1018,7 +1018,7 @@
       antialias: true,
       antialiasGL: true,
       pixelArt: false,
-      autoRound: false,
+      autoRound: true,
       roundPixels: false,
       resolution: RENDER_RESOLUTION,
       scale: {
