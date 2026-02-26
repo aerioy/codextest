@@ -87,8 +87,8 @@
       pitch: 0x12564a, pitchInner: 0x0e423a,
       line: 0xc8f5f0, goal: 0x5adcff,
       ball: 0xf5faff, ballStroke: 0x142028,
-      boost: 0x42caff, boostHint: 0x78a0be,
-      barrier: 0xff6e80,
+      boost: 0x41e676, boostHint: 0x88f0ad, boostArrow: 0x0b7c36,
+      barrierLeft: 0xff6e80, barrierRight: 0x5aa9ff,
       shieldFill: 0xffa546, shieldEdge: 0xffbe74,
       zoneFill: 0xff3737, zoneEdge: 0xff6b6b,
       panel: 0x0a1823, panelEdge: 0x54badc
@@ -190,7 +190,7 @@
         this.boostPad = null;
         this.lastBoostTime = -10;
         this.barriers = [];
-        this.inkUsed = 0;
+        this.inkUsed = { left: 0, right: 0 };
 
         this.kickoffSide = 'left';
         this.kickoffPhase = 'countdown';
@@ -360,7 +360,7 @@
           this.ballPos = s.ballPos; this.ballVel = s.ballVel;
           this.boostPad = s.boostPad;
           this.barriers = s.barriers;
-          this.inkUsed = s.inkUsed;
+          this.inkUsed = (typeof s.inkUsed === "number") ? { left: s.inkUsed, right: s.inkUsed } : s.inkUsed;
           this.kickoffSide = s.kickoffSide;
           const prevPhase = this.kickoffPhase;
           this.kickoffPhase = s.kickoffPhase;
@@ -483,7 +483,7 @@
           if (c.lStart) c.lCur = { ...p };
           if (c.rDraw && c.rLast) {
             if (!this.canSideInteract(side, c.rLast) || !this.canSideInteract(side, p)) return;
-            this.addBarrierStroke(c.rLast, p, this.now());
+            this.addBarrierStroke(side, c.rLast, p, this.now());
           }
           return;
         }
@@ -501,7 +501,7 @@
       clearDrawables() {
         this.boostPad = null;
         this.barriers = [];
-        this.inkUsed = 0;
+        this.inkUsed = { left: 0, right: 0 };
         for (const k of ['left', 'right']) {
           this.ctrl[k].lStart = null; this.ctrl[k].lCur = null;
           this.ctrl[k].rDraw = false; this.ctrl[k].rLast = null;
@@ -520,14 +520,19 @@
 
       removeExpiredBarriers(now) {
         const alive = [];
-        let used = 0;
+        const used = { left: 0, right: 0 };
         for (const b of this.barriers) {
-          if (now - b.created < BARRIER_LIFETIME) { alive.push(b); used += b.length; }
+          if (now - b.created < BARRIER_LIFETIME) {
+            alive.push(b);
+            const owner = b.owner === "right" ? "right" : "left";
+            used[owner] += b.length;
+          }
         }
-        this.barriers = alive; this.inkUsed = used;
+        this.barriers = alive;
+        this.inkUsed = used;
       }
 
-      addBarrierStroke(p0, p1, now) {
+      addBarrierStroke(owner, p0, p1, now) {
         const dx = p1.x - p0.x, dy = p1.y - p0.y;
         const dist = Math.hypot(dx, dy);
         if (dist < 1e-5) return;
@@ -537,9 +542,9 @@
           const t = i / steps;
           const cur = { x: p0.x + dx * t, y: p0.y + dy * t };
           const len = Math.hypot(cur.x - prev.x, cur.y - prev.y);
-          if (this.inkUsed + len > MAX_INK_LENGTH) break;
-          this.barriers.push({ a: { ...prev }, b: { ...cur }, created: now, length: len });
-          this.inkUsed += len;
+          if (this.inkUsed[owner] + len > MAX_INK_LENGTH) break;
+          this.barriers.push({ a: { ...prev }, b: { ...cur }, created: now, length: len, owner });
+          this.inkUsed[owner] += len;
           prev = cur;
         }
         for (const side of ['left','right']) {
@@ -756,14 +761,16 @@
 
         for (const b of this.barriers) {
           const a = clamp(1 - (now - b.created) / BARRIER_LIFETIME, 0, 1);
-          g.lineStyle(BARRIER_THICKNESS, COLORS.barrier, a);
+          const col = b.owner === "right" ? COLORS.barrierRight : COLORS.barrierLeft;
+          g.lineStyle(BARRIER_THICKNESS, col, a);
           g.beginPath(); g.moveTo(b.a.x, b.a.y); g.lineTo(b.b.x, b.b.y); g.strokePath();
         }
 
         for (const side of ['left', 'right']) {
           const c = this.ctrl[side];
           if (c.rDraw && c.rLast) {
-            g.lineStyle(2, COLORS.barrier, 0.8);
+            const col = side === "right" ? COLORS.barrierRight : COLORS.barrierLeft;
+            g.lineStyle(2, col, 0.8);
             g.beginPath(); g.moveTo(c.rLast.x, c.rLast.y); g.lineTo(c.pointer.x, c.pointer.y); g.strokePath();
           }
           if (c.lStart && c.lCur) {
@@ -776,6 +783,20 @@
         if (this.boostPad && this.boostPad.valid) {
           g.lineStyle(BOOST_PAD_THICKNESS, COLORS.boost, 1);
           g.beginPath(); g.moveTo(this.boostPad.a.x, this.boostPad.a.y); g.lineTo(this.boostPad.b.x, this.boostPad.b.y); g.strokePath();
+          const n = normalize(this.boostPad.b.x - this.boostPad.a.x, this.boostPad.b.y - this.boostPad.a.y);
+          const adx = -n.x, ady = -n.y;
+          const pdx = -ady, pdy = adx;
+          const arrowCount = Math.max(2, Math.floor(this.boostPad.length / 24));
+          for (let i = 1; i <= arrowCount; i++) {
+            const t = i / (arrowCount + 1);
+            const cx = Phaser.Math.Linear(this.boostPad.a.x, this.boostPad.b.x, t);
+            const cy = Phaser.Math.Linear(this.boostPad.a.y, this.boostPad.b.y, t);
+            const tipX = cx + adx * 7, tipY = cy + ady * 7;
+            const b1x = cx - adx * 5 + pdx * 4, b1y = cy - ady * 5 + pdy * 4;
+            const b2x = cx - adx * 5 - pdx * 4, b2y = cy - ady * 5 - pdy * 4;
+            g.fillStyle(COLORS.boostArrow, 0.9);
+            g.fillTriangle(tipX, tipY, b1x, b1y, b2x, b2y);
+          }
         }
 
         g.fillStyle(0x050a0c, 0.9); g.fillCircle(this.ballPos.x + 2.4, this.ballPos.y + 2.8, BALL_RADIUS + 1);
@@ -791,8 +812,10 @@
 
         const barX = ink.x + 14, barY = ink.y + 12, barW = ink.w - 28, barH = 16;
         u.fillStyle(0x233442, 1); u.fillRoundedRect(barX, barY, barW, barH, 8);
-        const rem = clamp((MAX_INK_LENGTH - this.inkUsed) / MAX_INK_LENGTH, 0, 1);
-        u.fillStyle(COLORS.barrier, 1); u.fillRoundedRect(barX + 2, barY + 2, Math.floor((barW - 4) * rem), barH - 4, 6);
+        const myInkUsed = this.inkUsed[this.playerSide] || 0;
+        const rem = clamp((MAX_INK_LENGTH - myInkUsed) / MAX_INK_LENGTH, 0, 1);
+        const myBarrierColor = this.playerSide === "right" ? COLORS.barrierRight : COLORS.barrierLeft;
+        u.fillStyle(myBarrierColor, 1); u.fillRoundedRect(barX + 2, barY + 2, Math.floor((barW - 4) * rem), barH - 4, 6);
         u.lineStyle(2, 0xa0d2e6, 1); u.strokeRoundedRect(barX, barY, barW, barH, 8);
 
         this.scoreText.setText(`${this.leftScore} : ${this.rightScore}`);
