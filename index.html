@@ -37,6 +37,7 @@
   <script>
     const WIDTH = 1100;
     const HEIGHT = 650;
+    const RENDER_RESOLUTION = Math.min(window.devicePixelRatio || 1, 2);
 
     const FIELD_LEFT = 40;
     const FIELD_RIGHT = WIDTH - 40;
@@ -855,7 +856,18 @@
       }
     }
 
-    new Phaser.Game({ type: Phaser.WEBGL, width: WIDTH, height: HEIGHT, parent: 'game', scene: [Scene] });
+    new Phaser.Game({
+      type: Phaser.WEBGL,
+      width: WIDTH,
+      height: HEIGHT,
+      parent: "game",
+      scene: [Scene],
+      antialias: true,
+      pixelArt: false,
+      autoRound: false,
+      roundPixels: false,
+      resolution: RENDER_RESOLUTION
+    });
   </script>
 </body>
 </html>
