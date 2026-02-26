@@ -200,7 +200,8 @@
       boost: 0x41e676, boostHint: 0x88f0ad, boostArrow: 0x0b7c36,
       barrierLeft: 0xff6e80, barrierRight: 0x5aa9ff,
       shieldFill: 0xffa546, shieldEdge: 0xffbe74,
-      zoneFill: 0xff3737, zoneEdge: 0xff6b6b,
+      zoneLeftFill: 0xff6e80, zoneLeftEdge: 0xff8fa1,
+      zoneRightFill: 0x5aa9ff, zoneRightEdge: 0x9bcdff,
       panel: 0x0a1823, panelEdge: 0x54badc
     };
 
@@ -910,11 +911,13 @@
           g.beginPath(); g.moveTo(xx, GOAL_TOP + 3); g.lineTo(xx, GOAL_BOTTOM - 3); g.strokePath();
         }
 
-        zg.fillStyle(COLORS.zoneFill, 0.42);
+        zg.fillStyle(COLORS.zoneLeftFill, 0.38);
         zg.fillRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
+        zg.fillStyle(COLORS.zoneRightFill, 0.38);
         zg.fillRoundedRect(this.rightZone.x, this.rightZone.y, this.rightZone.w, this.rightZone.h, BOOST_BLOCK_RADIUS);
-        zg.lineStyle(3, COLORS.zoneEdge, 0.95);
+        zg.lineStyle(3, COLORS.zoneLeftEdge, 0.95);
         zg.strokeRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
+        zg.lineStyle(3, COLORS.zoneRightEdge, 0.95);
         zg.strokeRoundedRect(this.rightZone.x, this.rightZone.y, this.rightZone.w, this.rightZone.h, BOOST_BLOCK_RADIUS);
 
         if (this.shieldActive(now)) {
