@@ -77,17 +77,14 @@
 <body>
   <div id="game"></div>
   <div id="net">
-    <div><strong>WebRTC Multiplayer</strong> <span id="role" class="muted">(not connected)</span></div>
+    <div><strong>PeerJS Multiplayer</strong> <span id="role" class="muted">(not connected)</span></div>
     <div class="row">
-      <button id="hostBtn">Host (Player 1 Left)</button>
+      <button id="hostBtn">Create Room (Player 1 Left)</button>
+      <input id="roomCode" placeholder="Room code" style="flex:1;min-width:120px;border-radius:8px;border:1px solid rgba(130,170,190,0.7);background:rgba(4,10,14,0.8);color:#d8f0ff;padding:6px 8px;">
       <button id="joinBtn">Join (Player 2 Right)</button>
-      <button id="copyLocalBtn">Copy Local SDP</button>
-      <button id="applyRemoteBtn">Apply Remote SDP</button>
+      <button id="copyRoomBtn">Copy Invite URL</button>
     </div>
-    <div class="muted" style="margin-top:6px">Local SDP (send to peer):</div>
-    <textarea id="localSdp" readonly></textarea>
-    <div class="muted" style="margin-top:6px">Remote SDP (paste from peer):</div>
-    <textarea id="remoteSdp"></textarea>
+    <div class="muted" id="roomInfo" style="margin-top:6px">No room yet.</div>
     <div id="status" class="muted" style="margin-top:6px">Disconnected</div>
   </div>
 
@@ -224,7 +221,7 @@
           right:{ lStart: null, lCur: null, rDraw: false, rLast: null, pointer: { x: 0, y: 0 } }
         };
 
-        this.net = { pc: null, dc: null, host: false, lastStateTx: 0 };
+        this.net = { peer: null, conn: null, host: false, roomCode: "", lastStateTx: 0 };
         this.setupNetUI();
 
         this.startKickoff(this.now(), 'left');
@@ -239,98 +236,109 @@
       status(msg) { document.getElementById('status').textContent = msg; }
 
       setupNetUI() {
-        const roleEl = document.getElementById('role');
-        const local = document.getElementById('localSdp');
-        const remote = document.getElementById('remoteSdp');
+        const roleEl = document.getElementById("role");
+        const roomInput = document.getElementById("roomCode");
+        const roomInfo = document.getElementById("roomInfo");
 
-        const waitIce = (pc) => new Promise((resolve) => {
-          if (pc.iceGatheringState === 'complete') return resolve();
-          const cb = () => {
-            if (pc.iceGatheringState === 'complete') {
-              pc.removeEventListener('icegatheringstatechange', cb);
-              resolve();
-            }
-          };
-          pc.addEventListener('icegatheringstatechange', cb);
-        });
+        const params = new URLSearchParams(window.location.search);
+        const presetRoom = (params.get("room") || "").trim().toUpperCase();
+        if (presetRoom) roomInput.value = presetRoom;
 
-        const initPC = async (hostMode) => {
-          this.net.host = hostMode;
-          this.net.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-          this.net.pc.onconnectionstatechange = () => this.status(`PC: ${this.net.pc.connectionState}`);
+        const makeRoomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
-          if (hostMode) {
-            this.net.dc = this.net.pc.createDataChannel('game');
-            this.bindDC(this.net.dc);
-            const offer = await this.net.pc.createOffer();
-            await this.net.pc.setLocalDescription(offer);
-            await waitIce(this.net.pc);
-            local.value = JSON.stringify(this.net.pc.localDescription);
-            roleEl.textContent = '(Host / Player 1 Left)';
-            this.playerSide = 'left';
-            this.isAuthoritative = true;
-            this.status('Host SDP ready. Send Local SDP to joiner.');
-          } else {
-            this.net.pc.ondatachannel = (ev) => {
-              this.net.dc = ev.channel;
-              this.bindDC(this.net.dc);
-            };
-            roleEl.textContent = '(Join / Player 2 Right)';
-            this.playerSide = 'right';
-            this.isAuthoritative = false;
-            this.status('Paste host offer then click Apply Remote SDP.');
-          }
-        };
-
-        document.getElementById('hostBtn').onclick = async () => {
-          await initPC(true);
-        };
-
-        document.getElementById('joinBtn').onclick = async () => {
-          await initPC(false);
-        };
-
-        document.getElementById('copyLocalBtn').onclick = async () => {
-          if (!local.value) return;
-          await navigator.clipboard.writeText(local.value);
-          this.status('Local SDP copied.');
-        };
-
-        document.getElementById('applyRemoteBtn').onclick = async () => {
-          if (!this.net.pc) return;
-          const txt = remote.value.trim();
-          if (!txt) return;
-          const desc = JSON.parse(txt);
-
-          if (this.net.host) {
-            await this.net.pc.setRemoteDescription(desc);
-            this.status('Answer applied. Waiting for data channel...');
-          } else {
-            await this.net.pc.setRemoteDescription(desc);
-            const answer = await this.net.pc.createAnswer();
-            await this.net.pc.setLocalDescription(answer);
-            await waitIce(this.net.pc);
-            local.value = JSON.stringify(this.net.pc.localDescription);
-            this.status('Answer SDP ready. Send Local SDP back to host.');
-          }
-        };
-      }
-
-      bindDC(dc) {
-        dc.onopen = () => {
-          this.connectionOpen = true;
-          this.status('Connected (DataChannel open)');
-        };
-        dc.onclose = () => {
+        const teardown = () => {
+          if (this.net.conn) { try { this.net.conn.close(); } catch {} }
+          if (this.net.peer) { try { this.net.peer.destroy(); } catch {} }
+          this.net.conn = null;
+          this.net.peer = null;
           this.connectionOpen = false;
-          this.status('DataChannel closed');
         };
-        dc.onmessage = (ev) => this.onNetMessage(ev.data);
+
+        const bindConn = (conn) => {
+          this.net.conn = conn;
+          conn.on("open", () => {
+            this.connectionOpen = true;
+            this.status("Connected");
+          });
+          conn.on("close", () => {
+            this.connectionOpen = false;
+            this.status("Disconnected");
+          });
+          conn.on("error", (err) => this.status("Conn error: " + (err && err.message ? err.message : err)));
+          conn.on("data", (data) => this.onNetMessage(typeof data === "string" ? data : JSON.stringify(data)));
+        };
+
+        const startHost = () => {
+          teardown();
+          const room = makeRoomCode();
+          this.net.host = true;
+          this.net.roomCode = room;
+          this.playerSide = "left";
+          this.isAuthoritative = true;
+
+          this.net.peer = new Peer(room);
+          this.net.peer.on("open", (id) => {
+            const url = window.location.origin + window.location.pathname + "?room=" + id;
+            roomInfo.textContent = "Room: " + id + " | Share URL with Player 2";
+            roleEl.textContent = "(Host / Player 1 Left)";
+            this.status("Room created. Waiting for Player 2...");
+            roomInput.value = id;
+            this.net.inviteUrl = url;
+          });
+          this.net.peer.on("connection", (conn) => {
+            if (this.net.conn && this.net.conn.open) {
+              conn.close();
+              return;
+            }
+            bindConn(conn);
+            this.status("Player 2 connected");
+          });
+          this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
+        };
+
+        const startJoin = () => {
+          const room = (roomInput.value || "").trim().toUpperCase();
+          if (!room) {
+            this.status("Enter a room code first");
+            return;
+          }
+          teardown();
+          this.net.host = false;
+          this.net.roomCode = room;
+          this.playerSide = "right";
+          this.isAuthoritative = false;
+          roleEl.textContent = "(Join / Player 2 Right)";
+
+          this.net.peer = new Peer();
+          this.net.peer.on("open", () => {
+            const conn = this.net.peer.connect(room, { reliable: true, serialization: "json" });
+            bindConn(conn);
+            this.status("Connecting to host...");
+            roomInfo.textContent = "Joining room: " + room;
+          });
+          this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
+        };
+
+        document.getElementById("hostBtn").onclick = startHost;
+        document.getElementById("joinBtn").onclick = startJoin;
+
+        document.getElementById("copyRoomBtn").onclick = async () => {
+          if (!this.net.inviteUrl) {
+            this.status("Create room first");
+            return;
+          }
+          await navigator.clipboard.writeText(this.net.inviteUrl);
+          this.status("Invite URL copied");
+        };
+
+        if (presetRoom) {
+          roomInfo.textContent = "Room preset from URL: " + presetRoom;
+        }
       }
 
       send(msg) {
-        if (!this.net.dc || this.net.dc.readyState !== 'open') return;
-        this.net.dc.send(JSON.stringify(msg));
+        if (!this.net.conn || !this.net.conn.open) return;
+        this.net.conn.send(msg);
       }
 
       onNetMessage(raw) {
