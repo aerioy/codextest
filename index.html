@@ -61,6 +61,7 @@
     const BOOST_IMPULSE_MIN = 200;
     const BOOST_IMPULSE_MAX = 760;
     const BOOST_COOLDOWN = 0.22;
+    const BOOST_PAD_LIFETIME = 2.0;
 
     const BARRIER_THICKNESS = 6;
     const BARRIER_SEGMENT_STEP = 8;
@@ -491,7 +492,7 @@
         if (e.k === 'up') {
           if (c.lStart && c.lCur) {
             const cand = this.makeBoost(c.lStart, c.lCur);
-            this.boostPad = this.boostAllowed(side, cand) ? cand : null;
+            if (this.boostAllowed(side, cand)) { cand.created = this.now(); this.boostPad = cand; } else this.boostPad = null;
             c.lStart = null; c.lCur = null;
           }
           c.rDraw = false; c.rLast = null;
@@ -516,6 +517,12 @@
         this.lastCountdownVal = null;
         this.ballPos = { x: concedingSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75, y: GOAL_CENTER_Y };
         this.ballVel = { x: 0, y: 0 };
+      }
+
+      removeExpiredBoost(now) {
+        if (!this.boostPad) return;
+        const born = this.boostPad.created ?? now;
+        if (now - born >= BOOST_PAD_LIFETIME) this.boostPad = null;
       }
 
       removeExpiredBarriers(now) {
@@ -554,6 +561,8 @@
 
       applyBoost(now) {
         if (!this.boostPad || !this.boostPad.valid) return;
+        const born = this.boostPad.created ?? now;
+        if (now - born >= BOOST_PAD_LIFETIME) { this.boostPad = null; return; }
         if (now - this.lastBoostTime < BOOST_COOLDOWN) return;
         const hit = distancePointToSegment(this.ballPos, this.boostPad.a, this.boostPad.b);
         if (hit.d > BALL_RADIUS + BOOST_PAD_THICKNESS) return;
@@ -682,6 +691,7 @@
         const now = this.now();
 
         if (this.isAuthoritative) {
+          this.removeExpiredBoost(now);
           this.removeExpiredBarriers(now);
 
           if (this.kickoffPhase === 'countdown') {
@@ -781,7 +791,9 @@
         }
 
         if (this.boostPad && this.boostPad.valid) {
-          g.lineStyle(BOOST_PAD_THICKNESS, COLORS.boost, 1);
+          const age = Math.max(0, now - (this.boostPad.created ?? now));
+          const ba = clamp(1 - age / BOOST_PAD_LIFETIME, 0, 1);
+          g.lineStyle(BOOST_PAD_THICKNESS, COLORS.boost, ba);
           g.beginPath(); g.moveTo(this.boostPad.a.x, this.boostPad.a.y); g.lineTo(this.boostPad.b.x, this.boostPad.b.y); g.strokePath();
           const n = normalize(this.boostPad.b.x - this.boostPad.a.x, this.boostPad.b.y - this.boostPad.a.y);
           const adx = -n.x, ady = -n.y;
