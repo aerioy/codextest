@@ -73,12 +73,11 @@
     #net .muted { color: #9cc2d6; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
   <div id="game"></div>
   <div id="net">
-    <div><strong>PeerJS Multiplayer</strong> <span id="role" class="muted">(not connected)</span></div>
+    <div><strong>Managed Multiplayer</strong> <span id="role" class="muted">(not connected)</span></div>
     <div class="row">
       <button id="hostBtn">Create Room (Player 1 Left)</button>
       <input id="roomCode" placeholder="Room code" style="flex:1;min-width:120px;border-radius:8px;border:1px solid rgba(130,170,190,0.7);background:rgba(4,10,14,0.8);color:#d8f0ff;padding:6px 8px;">
@@ -87,7 +86,7 @@
     </div>
     <div class="muted" id="roomInfo" style="margin-top:6px">No room yet.</div>
     <div id="status" class="muted" style="margin-top:6px">Disconnected</div>
-    <div id="iceInfo" class="muted" style="margin-top:4px">ICE: idle</div>
+    <div id="iceInfo" class="muted" style="margin-top:4px">Transport: idle</div>
   </div>
 
   <script>
@@ -133,13 +132,7 @@
     const STALL_TIME_TO_NUDGE = 0.65;
     const STALL_NUDGE_IMPULSE = 170.0;
 
-    const TURN_TOKEN_ENDPOINT = "https://ink-soccer-turn-token.amiragrama-35d.workers.dev/turn"; // Cloudflare Worker TURN token endpoint
-    const TURN_PROVIDER = {
-      // Optional local fallback if TURN token endpoint is unavailable.
-      urls: [],
-      username: "",
-      credential: ""
-    };
+    const BACKEND_WS_ORIGIN = "https://ink-soccer-realtime.amiragrama-35d.workers.dev"; // Managed realtime backend
 
     const COLORS = {
       bgTop: 0x111f2f, bgBottom: 0x070c14,
@@ -231,7 +224,7 @@
           right:{ lStart: null, lCur: null, rDraw: false, rLast: null, pointer: { x: 0, y: 0 } }
         };
 
-        this.net = { peer: null, conn: null, host: false, roomCode: "", lastStateTx: 0, iceTimer: null };
+        this.net = { ws: null, host: false, roomCode: "", lastStateTx: 0, connectTimer: null, inviteUrl: "" };
         this.setupNetUI();
 
         this.startKickoff(this.now(), 'left');
@@ -245,63 +238,7 @@
 
       status(msg) { document.getElementById('status').textContent = msg; }
 
-      iceStatus(msg) { document.getElementById('iceInfo').textContent = "ICE: " + msg; }
-
-      clearIceMonitor() {
-        if (this.net.iceTimer) {
-          clearInterval(this.net.iceTimer);
-          this.net.iceTimer = null;
-        }
-        this.iceStatus("idle");
-      }
-
-      startIceMonitor(conn) {
-        this.clearIceMonitor();
-        const pc = conn.peerConnection || (conn._negotiator && conn._negotiator._pc);
-        if (!pc || typeof pc.getStats !== "function") {
-          this.iceStatus("unavailable");
-          return;
-        }
-
-        const update = async () => {
-          try {
-            const stats = await pc.getStats();
-            const byId = new Map();
-            stats.forEach((r) => byId.set(r.id, r));
-
-            let pair = null;
-            stats.forEach((r) => {
-              if (r.type === "transport" && r.selectedCandidatePairId && byId.has(r.selectedCandidatePairId)) {
-                pair = byId.get(r.selectedCandidatePairId);
-              }
-            });
-            if (!pair) {
-              stats.forEach((r) => {
-                if (r.type === "candidate-pair" && (r.selected || (r.nominated && r.state === "succeeded"))) {
-                  pair = r;
-                }
-              });
-            }
-
-            let ctype = "unknown";
-            if (pair && pair.localCandidateId && byId.has(pair.localCandidateId)) {
-              const local = byId.get(pair.localCandidateId);
-              ctype = local.candidateType || "unknown";
-            }
-            const iceState = pc.iceConnectionState || "new";
-            this.iceStatus(`${iceState} | path: ${ctype}`);
-          } catch {
-            this.iceStatus("stats error");
-          }
-        };
-
-        pc.oniceconnectionstatechange = () => {
-          this.iceStatus((pc.iceConnectionState || "new") + " | path: ...");
-        };
-
-        update();
-        this.net.iceTimer = setInterval(update, 1500);
-      }
+      transportStatus(msg) { document.getElementById('iceInfo').textContent = "Transport: " + msg; }
 
       setupNetUI() {
         const roleEl = document.getElementById("role");
@@ -313,93 +250,121 @@
         if (presetRoom) roomInput.value = presetRoom;
 
         const makeRoomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
-
-        const buildPeerOptions = async () => {
-          const defaultStun = { urls: ["stun:stun.relay.metered.ca:80", "stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] };
-
-          if (TURN_TOKEN_ENDPOINT) {
-            try {
-              const res = await fetch(TURN_TOKEN_ENDPOINT, { method: "GET" });
-              if (res.ok) {
-                const data = await res.json();
-                if (Array.isArray(data.iceServers) && data.iceServers.length) {
-                  const hasStun = data.iceServers.some((s) => {
-                    const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-                    return urls.some((u) => typeof u === "string" && u.startsWith("stun:"));
-                  });
-                  if (!hasStun) data.iceServers.unshift(defaultStun);
-                  return { config: { iceServers: data.iceServers } };
-                }
-              }
-            } catch {
-              // Fall through to local fallback providers.
-            }
-          }
-
-          const iceServers = [defaultStun];
-          if (TURN_PROVIDER.username && TURN_PROVIDER.credential && TURN_PROVIDER.urls && TURN_PROVIDER.urls.length) {
-            iceServers.unshift({ urls: TURN_PROVIDER.urls, username: TURN_PROVIDER.username, credential: TURN_PROVIDER.credential });
-          }
-
-          return { config: { iceServers } };
-        };
+        const wsBase = (() => {
+          if (BACKEND_WS_ORIGIN) return BACKEND_WS_ORIGIN.replace(/\/$/, "").replace(/^http/, "ws");
+          const p = window.location.protocol === "https:" ? "wss" : "ws";
+          return `${p}://${window.location.host}`;
+        })();
 
         const teardown = () => {
-          if (this.net.conn) { try { this.net.conn.close(); } catch {} }
-          if (this.net.peer) { try { this.net.peer.destroy(); } catch {} }
-          this.net.conn = null;
-          this.net.peer = null;
+          if (this.net.ws) { try { this.net.ws.close(); } catch {} }
+          if (this.net.connectTimer) {
+            clearTimeout(this.net.connectTimer);
+            this.net.connectTimer = null;
+          }
+          this.net.ws = null;
           this.connectionOpen = false;
-          this.clearIceMonitor();
+          this.transportStatus("idle");
         };
 
-        const bindConn = (conn) => {
-          this.net.conn = conn;
-          conn.on("open", () => {
-            this.connectionOpen = true;
-            this.status("Connected");
-            this.startIceMonitor(conn);
-          });
-          conn.on("close", () => {
+        const bindSocket = (ws, role, room) => {
+          this.net.ws = ws;
+          this.transportStatus("ws connecting");
+
+          ws.onopen = () => {
+            this.status(role === "host" ? "Room created. Waiting for Player 2..." : "Connecting to host...");
+            this.transportStatus("ws open");
+          };
+
+          ws.onclose = () => {
             this.connectionOpen = false;
             this.status("Disconnected");
-            this.clearIceMonitor();
-          });
-          conn.on("error", (err) => this.status("Conn error: " + (err && err.message ? err.message : err)));
-          conn.on("data", (data) => this.onNetMessage(typeof data === "string" ? data : JSON.stringify(data)));
+            this.transportStatus("ws closed");
+          };
+
+          ws.onerror = () => {
+            this.status("Connection error");
+            this.transportStatus("ws error");
+          };
+
+          ws.onmessage = (ev) => {
+            let m;
+            try { m = JSON.parse(ev.data); } catch {
+              this.onNetMessage(ev.data);
+              return;
+            }
+
+            if (m.t === "ready") {
+              const isHost = m.role === "host";
+              this.net.host = isHost;
+              this.playerSide = isHost ? "left" : "right";
+              this.isAuthoritative = isHost;
+              roleEl.textContent = isHost ? "(Host / Player 1 Left)" : "(Join / Player 2 Right)";
+              this.net.roomCode = m.room || room;
+              roomInput.value = this.net.roomCode;
+              const inviteUrl = window.location.origin + window.location.pathname + "?room=" + this.net.roomCode;
+              this.net.inviteUrl = inviteUrl;
+              roomInfo.textContent = "Room: " + this.net.roomCode + " | Share URL with Player 2";
+              if (isHost) {
+                this.status("Room created. Waiting for Player 2...");
+              } else {
+                this.status("Connected to room. Waiting for host sync...");
+              }
+              return;
+            }
+
+            if (m.t === "peer") {
+              if (m.state === "joined") {
+                this.connectionOpen = true;
+                this.status("Connected");
+                this.transportStatus("ws linked");
+              } else if (m.state === "left") {
+                this.connectionOpen = false;
+                this.status("Peer disconnected");
+                this.transportStatus("ws open");
+              }
+              return;
+            }
+
+            if (m.t === "error") {
+              this.status(m.msg || "Backend error");
+              return;
+            }
+
+            this.onNetMessage(ev.data);
+          };
+
+          if (role === "join") {
+            this.net.connectTimer = setTimeout(() => {
+              if (!this.connectionOpen && this.net.ws === ws) {
+                this.status("Join timeout. Confirm room code and that host is online.");
+              }
+            }, 10000);
+          }
         };
 
-        const startHost = async () => {
+        const connectRoom = (room, role) => {
+          const encoded = encodeURIComponent(room);
+          const ws = new WebSocket(`${wsBase}/room/${encoded}?role=${role}`);
+          bindSocket(ws, role, room);
+        };
+
+        const startHost = () => {
           teardown();
           const room = makeRoomCode();
           this.net.host = true;
           this.net.roomCode = room;
           this.playerSide = "left";
           this.isAuthoritative = true;
-
-          this.status("Preparing connection...");
-          const peerOptions = await buildPeerOptions();
-          this.net.peer = new Peer(room, peerOptions);
-          this.net.peer.on("open", (id) => {
-            const url = window.location.origin + window.location.pathname + "?room=" + id;
-            roomInfo.textContent = "Room: " + id + " | Share URL with Player 2";
-            roleEl.textContent = "(Host / Player 1 Left)";
-            this.status("Room created. Waiting for Player 2...");
-            roomInput.value = id;
-            this.net.inviteUrl = url;
-          });
-          this.net.peer.on("connection", (conn) => {
-            if (this.net.conn && this.net.conn.open) {
-              conn.close();
-              return;
-            }
-            bindConn(conn);
-            this.status("Player 2 is connecting...");
-          });
-          this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
+          roleEl.textContent = "(Host / Player 1 Left)";
+          roomInfo.textContent = "Room: " + room + " | Share URL with Player 2";
+          roomInput.value = room;
+          this.net.inviteUrl = window.location.origin + window.location.pathname + "?room=" + room;
+          this.status("Creating room...");
+          connectRoom(room, "host");
         };
 
-        const startJoin = async () => {
+        const startJoin = () => {
           const room = (roomInput.value || "").trim().toUpperCase();
           if (!room) {
             this.status("Enter a room code first");
@@ -411,26 +376,13 @@
           this.playerSide = "right";
           this.isAuthoritative = false;
           roleEl.textContent = "(Join / Player 2 Right)";
-
-          this.status("Preparing connection...");
-          const peerOptions = await buildPeerOptions();
-          this.net.peer = new Peer(peerOptions);
-          this.net.peer.on("open", () => {
-            const conn = this.net.peer.connect(room, { reliable: true, serialization: "json" });
-            bindConn(conn);
-            this.status("Connecting to host...");
-            roomInfo.textContent = "Joining room: " + room;
-            setTimeout(() => {
-              if (!this.connectionOpen && this.net.conn === conn) {
-                this.status("Connect timeout. If peers are on different networks, TURN relay is required.");
-              }
-            }, 10000);
-          });
-          this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
+          roomInfo.textContent = "Joining room: " + room;
+          this.status("Connecting to host...");
+          connectRoom(room, "join");
         };
 
-        document.getElementById("hostBtn").onclick = () => { startHost().catch((e) => this.status("Host setup error: " + e.message)); };
-        document.getElementById("joinBtn").onclick = () => { startJoin().catch((e) => this.status("Join setup error: " + e.message)); };
+        document.getElementById("hostBtn").onclick = startHost;
+        document.getElementById("joinBtn").onclick = startJoin;
 
         document.getElementById("copyRoomBtn").onclick = async () => {
           if (!this.net.inviteUrl) {
@@ -447,8 +399,8 @@
       }
 
       send(msg) {
-        if (!this.net.conn || !this.net.conn.open) return;
-        this.net.conn.send(msg);
+        if (!this.net.ws || this.net.ws.readyState !== WebSocket.OPEN || !this.connectionOpen) return;
+        this.net.ws.send(msg);
       }
 
       onNetMessage(raw) {
