@@ -317,7 +317,7 @@
 
       send(msg) {
         if (!this.net.ws || this.net.ws.readyState !== WebSocket.OPEN) return;
-        this.net.ws.send(msg);
+        this.net.ws.send(JSON.stringify(msg));
       }
 
       onNetMessage(raw) {
