@@ -161,7 +161,7 @@
     const GOAL_BOTTOM = GOAL_CENTER_Y + GOAL_OPENING * 0.5;
 
     const BALL_RADIUS = 14;
-    const BALL_DAMPING = 0.9965;
+    const BALL_DAMPING = 0.9982;
     const BALL_MAX_SPEED = 1100;
 
     const BOOST_PAD_THICKNESS = 8;
@@ -745,12 +745,12 @@
         const pen = BALL_RADIUS + BARRIER_THICKNESS * 0.5 - hit.d;
         this.ballPos.x += nx * pen; this.ballPos.y += ny * pen;
         const vn = this.ballVel.x * nx + this.ballVel.y * ny;
-        if (vn < 0) { this.ballVel.x -= 1.95 * vn * nx; this.ballVel.y -= 1.95 * vn * ny; }
+        if (vn < 0) { this.ballVel.x -= 1.98 * vn * nx; this.ballVel.y -= 1.98 * vn * ny; }
       }
 
       reflect(nx, ny) {
         const vn = this.ballVel.x * nx + this.ballVel.y * ny;
-        if (vn > 0) { this.ballVel.x -= 1.95 * vn * nx; this.ballVel.y -= 1.95 * vn * ny; }
+        if (vn > 0) { this.ballVel.x -= 1.98 * vn * nx; this.ballVel.y -= 1.98 * vn * ny; }
       }
 
       goal(scorerRight, now) {
