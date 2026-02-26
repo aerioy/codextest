@@ -272,7 +272,12 @@
           if (role === "join") {
             this.net.connectTimer = setTimeout(() => {
               if (!this.connectionOpen && this.net.ws === ws) {
-                this.status("Join timeout. Confirm room code and that host is online.");
+                this.status("No host found. Claiming room as host...");
+                try { ws.close(); } catch {}
+                this.net.host = true;
+                this.playerSide = "left";
+                this.isAuthoritative = true;
+                connectRoom(room, "host");
               }
             }, 10000);
           }
