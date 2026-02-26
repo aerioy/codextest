@@ -40,7 +40,7 @@
 
     const FIELD_LEFT = 40;
     const FIELD_RIGHT = WIDTH - 40;
-    const FIELD_TOP = 132;
+    const FIELD_TOP = 40;
     const FIELD_BOTTOM = HEIGHT - 40;
     const FIELD_CORNER_RADIUS = 92;
     const GOAL_OPENING = 246;
@@ -137,17 +137,17 @@
         this.maskSrc.fillRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP);
         this.zoneG.setMask(this.maskSrc.createGeometryMask());
 
-        this.scoreText = this.add.text(WIDTH / 2, 28, '0 : 0', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '52px', color: '#e4f4ff', fontStyle: '700' }).setOrigin(0.5, 0);
-        this.leftTagText = this.add.text(WIDTH / 2 - 150, 56, 'Me', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
-        this.rightTagText = this.add.text(WIDTH / 2 + 150, 56, 'Opponent', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
+        this.scoreText = this.add.text(WIDTH / 2, 6, '0 : 0', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '34px', color: '#e4f4ff', fontStyle: '700' }).setOrigin(0.5, 0);
+        this.leftTagText = this.add.text(WIDTH / 2 - 130, 14, 'Me', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '12px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
+        this.rightTagText = this.add.text(WIDTH / 2 + 130, 14, 'Opponent', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '12px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
         this.kickText = this.add.text(WIDTH / 2, HEIGHT / 2 - 140, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '34px', color: '#a0f0ff', fontStyle: '700' }).setOrigin(0.5);
-        this.shieldText = this.add.text(WIDTH / 2, 98, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#ffbe74' }).setOrigin(0.5);
+        this.shieldText = this.add.text(WIDTH / 2, HEIGHT - 46, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '15px', color: '#ffbe74' }).setOrigin(0.5);
         this.hintText = this.add.text(WIDTH / 2, HEIGHT - 20, 'L-drag: boost  R-drag: wall  R: reset', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' }).setOrigin(0.5);
-        this.netHintText = this.add.text(WIDTH / 2, 90, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '16px', color: '#9cc2d6' }).setOrigin(0.5);
-        this.roomText = this.add.text(WIDTH / 2, 112, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '14px', color: '#7fa8bf' }).setOrigin(0.5);
+        this.netHintText = this.add.text(WIDTH / 2, HEIGHT - 62, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '14px', color: '#9cc2d6' }).setOrigin(0.5);
+        this.roomText = this.add.text(WIDTH / 2, HEIGHT - 30, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '13px', color: '#7fa8bf' }).setOrigin(0.5);
 
-        this.inkLabel = this.add.text(WIDTH - 274, 22, 'INK', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' });
-        this.inkPct = this.add.text(WIDTH - 34, 66, '100%', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#e4f4ff' }).setOrigin(1, 0);
+        this.inkLabel = this.add.text(WIDTH - 254, 7, 'INK', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' });
+        this.inkPct = this.add.text(WIDTH - 28, 6, '100%', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '14px', color: '#e4f4ff' }).setOrigin(1, 0);
 
         this.playerSide = 'left';
         this.isAuthoritative = true;
@@ -747,14 +747,14 @@
         g.fillStyle(COLORS.ball, 1); g.fillCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
         g.lineStyle(2, COLORS.ballStroke, 1); g.strokeCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
 
-        const top = { x: WIDTH / 2 - 200, y: 10, w: 400, h: 78 };
-        const ink = { x: WIDTH - 290, y: 12, w: 270, h: 82 };
+        const top = { x: WIDTH / 2 - 190, y: 4, w: 380, h: 34 };
+        const ink = { x: WIDTH - 270, y: 4, w: 250, h: 34 };
         for (const p of [top, ink]) {
           u.fillStyle(COLORS.panel, 0.78); u.fillRoundedRect(p.x, p.y, p.w, p.h, 12);
           u.lineStyle(2, COLORS.panelEdge, 0.52); u.strokeRoundedRect(p.x, p.y, p.w, p.h, 12);
         }
 
-        const barX = ink.x + 16, barY = ink.y + 38, barW = ink.w - 32, barH = 22;
+        const barX = ink.x + 14, barY = ink.y + 12, barW = ink.w - 28, barH = 16;
         u.fillStyle(0x233442, 1); u.fillRoundedRect(barX, barY, barW, barH, 8);
         const rem = clamp((MAX_INK_LENGTH - this.inkUsed) / MAX_INK_LENGTH, 0, 1);
         u.fillStyle(COLORS.barrier, 1); u.fillRoundedRect(barX + 2, barY + 2, Math.floor((barW - 4) * rem), barH - 4, 6);
