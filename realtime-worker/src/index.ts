@@ -36,12 +36,9 @@ export class RoomDO extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return bad("Expected websocket", 426);
     const url = new URL(request.url);
-    const role = (url.searchParams.get("role") || "").toLowerCase();
     const room = (url.pathname.split("/").pop() || "").toUpperCase();
-    if (role !== "host" && role !== "join") return bad("role must be host|join", 400);
-
-    if (role === "host" && this.host) return bad("Host already connected", 409);
-    if (role === "join" && this.join) return bad("Join side already connected", 409);
+    const role = this.host ? (this.join ? "spectator" : "join") : "host";
+    if (role === "spectator") return bad("Room is full", 409);
 
     const pair = new WebSocketPair();
     const client = pair[0];

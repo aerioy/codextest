@@ -214,12 +214,12 @@
           this.transportStatus("idle");
         };
 
-        const bindSocket = (ws, role, room) => {
+        const bindSocket = (ws, room) => {
           this.net.ws = ws;
           this.transportStatus("ws connecting");
 
           ws.onopen = () => {
-            this.status(role === "host" ? "Room created. Waiting for Player 2..." : "Connecting to host...");
+            this.status("Connecting...");
             this.transportStatus("ws open");
           };
 
@@ -274,47 +274,35 @@
             this.onNetMessage(ev.data);
           };
 
-          if (role === "join") {
-            this.net.connectTimer = setTimeout(() => {
-              if (!this.connectionOpen && this.net.ws === ws) {
-                this.status("Join timeout. Host not reachable for this room.");
-                this.transportStatus("ws timeout");
-              }
-            }, 10000);
-          }
+          this.net.connectTimer = setTimeout(() => {
+            if (!this.connectionOpen && this.net.ws === ws && !this.net.host) {
+              this.status("Join timeout. Host not reachable for this room.");
+              this.transportStatus("ws timeout");
+            }
+          }, 10000);
         };
 
-        const connectRoom = (room, role) => {
+        const connectRoom = (room) => {
           const encoded = encodeURIComponent(room);
-          const ws = new WebSocket(`${wsBase}/room/${encoded}?role=${role}`);
-          bindSocket(ws, role, room);
+          const ws = new WebSocket(`${wsBase}/room/${encoded}`);
+          bindSocket(ws, room);
         };
 
         teardown();
-        const HOST_ROOM_KEY = "ink_soccer_host_room";
         const room = presetRoom || makeRoomCode();
         const url = window.location.origin + window.location.pathname + "?room=" + room;
         this.net.inviteUrl = url;
 
         if (!presetRoom) {
-          localStorage.setItem(HOST_ROOM_KEY, room);
           history.replaceState(null, "", url);
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(() => this.status("Invite URL copied"))
               .catch(() => this.status("Invite URL ready"));
           }
-          this.net.host = true;
-          this.playerSide = "left";
-          this.isAuthoritative = true;
-          connectRoom(room, "host");
         } else {
-          const rememberedHostRoom = (localStorage.getItem(HOST_ROOM_KEY) || "").toUpperCase();
-          const shouldHost = rememberedHostRoom === room;
-          this.net.host = shouldHost;
-          this.playerSide = shouldHost ? "left" : "right";
-          this.isAuthoritative = shouldHost;
-          connectRoom(room, shouldHost ? "host" : "join");
+          this.status("Joining room...");
         }
+        connectRoom(room);
       }
 
       send(msg) {
