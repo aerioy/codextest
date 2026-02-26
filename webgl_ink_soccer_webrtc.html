@@ -40,7 +40,7 @@
 
     const FIELD_LEFT = 40;
     const FIELD_RIGHT = WIDTH - 40;
-    const FIELD_TOP = 96;
+    const FIELD_TOP = 132;
     const FIELD_BOTTOM = HEIGHT - 40;
     const FIELD_CORNER_RADIUS = 92;
     const GOAL_OPENING = 246;
@@ -79,7 +79,6 @@
     const STALL_SPEED_THRESHOLD = 20.0;
     const STALL_TIME_TO_NUDGE = 0.65;
     const STALL_NUDGE_IMPULSE = 170.0;
-    const WAITING_TOUCH_TIMEOUT = 4.0;
 
     const BACKEND_WS_ORIGIN = "https://ink-soccer-realtime.amiragrama-35d.workers.dev"; // Managed realtime backend
 
@@ -139,8 +138,8 @@
         this.zoneG.setMask(this.maskSrc.createGeometryMask());
 
         this.scoreText = this.add.text(WIDTH / 2, 28, '0 : 0', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '52px', color: '#e4f4ff', fontStyle: '700' }).setOrigin(0.5, 0);
-        this.leftTagText = this.add.text(WIDTH / 2 - 182, 56, 'Me', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
-        this.rightTagText = this.add.text(WIDTH / 2 + 182, 56, 'Opponent', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
+        this.leftTagText = this.add.text(WIDTH / 2 - 150, 56, 'Me', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
+        this.rightTagText = this.add.text(WIDTH / 2 + 150, 56, 'Opponent', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
         this.kickText = this.add.text(WIDTH / 2, HEIGHT / 2 - 140, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '34px', color: '#a0f0ff', fontStyle: '700' }).setOrigin(0.5);
         this.shieldText = this.add.text(WIDTH / 2, 98, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#ffbe74' }).setOrigin(0.5);
         this.hintText = this.add.text(WIDTH / 2, HEIGHT - 20, 'L-drag: boost  R-drag: wall  R: reset', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' }).setOrigin(0.5);
@@ -168,7 +167,6 @@
         this.shieldEnd = 0;
         this.zoneStallTimer = 0;
         this.lastCountdownVal = null;
-        this.waitingTouchStart = 0;
 
         this.leftZone = { x: GOAL_LINE_X_LEFT - BOOST_BLOCK_DEPTH * 0.5, y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5, w: BOOST_BLOCK_DEPTH, h: BOOST_BLOCK_HEIGHT };
         this.rightZone = { x: GOAL_LINE_X_RIGHT - BOOST_BLOCK_DEPTH * 0.5, y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5, w: BOOST_BLOCK_DEPTH, h: BOOST_BLOCK_HEIGHT };
@@ -335,8 +333,6 @@
           const prevPhase = this.kickoffPhase;
           this.kickoffPhase = s.kickoffPhase;
           const now = this.now();
-          if (this.kickoffPhase === 'waiting_touch' && prevPhase !== 'waiting_touch') this.waitingTouchStart = now;
-          if (this.kickoffPhase !== 'waiting_touch') this.waitingTouchStart = 0;
           this.kickoffCountdownEnd = now + s.countdownRemaining;
           this.shieldEnd = now + s.shieldRemaining;
           this.ctrl.left = s.ctrl.left;
@@ -485,7 +481,6 @@
         this.kickoffCountdownEnd = now + KICKOFF_COUNTDOWN;
         this.shieldEnd = 0;
         this.lastCountdownVal = null;
-        this.waitingTouchStart = 0;
         this.ballPos = { x: concedingSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75, y: GOAL_CENTER_Y };
         this.ballVel = { x: 0, y: 0 };
       }
@@ -653,13 +648,12 @@
             this.ballPos.x = this.kickoffSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75;
             this.ballPos.y = GOAL_CENTER_Y;
             this.ballVel.x = 0; this.ballVel.y = 0;
-            if (now >= this.kickoffCountdownEnd) { this.kickoffPhase = 'waiting_touch'; this.waitingTouchStart = now; }
+            if (now >= this.kickoffCountdownEnd) { this.kickoffPhase = 'waiting_touch'; }
           } else if (this.kickoffPhase === 'waiting_touch') {
             this.ballPos.x = this.kickoffSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75;
             this.ballPos.y = GOAL_CENTER_Y;
             this.ballVel.x = 0; this.ballVel.y = 0;
             this.applyBoost(now);
-            if (now - this.waitingTouchStart >= WAITING_TOUCH_TIMEOUT) { this.kickoffPhase = 'live'; this.shieldEnd = now + GOAL_SHIELD_DURATION; }
           } else {
             this.ballPos.x += this.ballVel.x * dt;
             this.ballPos.y += this.ballVel.y * dt;
@@ -784,7 +778,7 @@
           this.kickText.setText(String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now))));
           this.kickText.setVisible(true);
         } else if (this.kickoffPhase === 'waiting_touch') {
-          this.kickText.setText(`GO ${(WAITING_TOUCH_TIMEOUT - Math.max(0, now - this.waitingTouchStart)).toFixed(1)}s`); this.kickText.setVisible(true);
+          this.kickText.setText('GO'); this.kickText.setVisible(true);
         } else this.kickText.setVisible(false);
 
         if (this.shieldActive(now)) {
