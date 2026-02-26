@@ -133,6 +133,18 @@
     const STALL_TIME_TO_NUDGE = 0.65;
     const STALL_NUDGE_IMPULSE = 170.0;
 
+    const TURN_PROVIDER = {
+      // Replace with your dedicated TURN provider credentials.
+      urls: [
+        "turn:global.relay.metered.ca:80",
+        "turn:global.relay.metered.ca:80?transport=tcp",
+        "turn:global.relay.metered.ca:443",
+        "turns:global.relay.metered.ca:443?transport=tcp"
+      ],
+      username: "fa7eef2ae84da22593524042",
+      credential: "p4ASfEtlTCl7rLlc"
+    };
+
     const COLORS = {
       bgTop: 0x111f2f, bgBottom: 0x070c14,
       pitch: 0x12564a, pitchInner: 0x0e423a,
@@ -306,47 +318,49 @@
 
         const makeRoomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
-        const makeOpenRelayCredentials = async () => {
-          const username = `${Math.floor(Date.now() / 1000) + 24 * 3600}:codextest`;
-          const enc = new TextEncoder();
-          const key = await crypto.subtle.importKey(
-            "raw",
-            enc.encode("openrelayprojectsecret"),
-            { name: "HMAC", hash: "SHA-1" },
-            false,
-            ["sign"]
-          );
-          const sig = await crypto.subtle.sign("HMAC", key, enc.encode(username));
-          const bytes = new Uint8Array(sig);
-          let raw = "";
-          for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
-          return { username, credential: btoa(raw) };
-        };
-
         const buildPeerOptions = async () => {
           const iceServers = [
-            { urls: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }
+            { urls: ["stun:stun.relay.metered.ca:80", "stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }
           ];
 
-          try {
-            const creds = await makeOpenRelayCredentials();
+          if (TURN_PROVIDER.username && TURN_PROVIDER.credential && TURN_PROVIDER.urls && TURN_PROVIDER.urls.length) {
             iceServers.unshift({
-              urls: [
-                "turn:staticauth.openrelay.metered.ca:80?transport=udp",
-                "turn:staticauth.openrelay.metered.ca:80?transport=tcp",
-                "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
-                "turns:staticauth.openrelay.metered.ca:443?transport=tcp"
-              ],
-              username: creds.username,
-              credential: creds.credential
+              urls: TURN_PROVIDER.urls,
+              username: TURN_PROVIDER.username,
+              credential: TURN_PROVIDER.credential
             });
-          } catch {
-            // Fallback to legacy public credentials if WebCrypto is unavailable.
-            iceServers.unshift({
-              urls: ["turn:openrelay.metered.ca:80?transport=tcp"],
-              username: "openrelayproject",
-              credential: "openrelayproject"
-            });
+          } else {
+            try {
+              const username = `${Math.floor(Date.now() / 1000) + 24 * 3600}:codextest`;
+              const enc = new TextEncoder();
+              const key = await crypto.subtle.importKey(
+                "raw",
+                enc.encode("openrelayprojectsecret"),
+                { name: "HMAC", hash: "SHA-1" },
+                false,
+                ["sign"]
+              );
+              const sig = await crypto.subtle.sign("HMAC", key, enc.encode(username));
+              const bytes = new Uint8Array(sig);
+              let raw = "";
+              for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
+              iceServers.unshift({
+                urls: [
+                  "turn:staticauth.openrelay.metered.ca:80?transport=udp",
+                  "turn:staticauth.openrelay.metered.ca:80?transport=tcp",
+                  "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
+                  "turns:staticauth.openrelay.metered.ca:443?transport=tcp"
+                ],
+                username,
+                credential: btoa(raw)
+              });
+            } catch {
+              iceServers.unshift({
+                urls: ["turn:openrelay.metered.ca:80?transport=tcp"],
+                username: "openrelayproject",
+                credential: "openrelayproject"
+              });
+            }
           }
 
           return { config: { iceServers } };
