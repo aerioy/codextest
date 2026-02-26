@@ -133,16 +133,12 @@
     const STALL_TIME_TO_NUDGE = 0.65;
     const STALL_NUDGE_IMPULSE = 170.0;
 
+    const TURN_TOKEN_ENDPOINT = "https://ink-soccer-turn-token.amiragrama-35d.workers.dev/turn"; // Cloudflare Worker TURN token endpoint
     const TURN_PROVIDER = {
-      // Replace with your dedicated TURN provider credentials.
-      urls: [
-        "turn:global.relay.metered.ca:80",
-        "turn:global.relay.metered.ca:80?transport=tcp",
-        "turn:global.relay.metered.ca:443",
-        "turns:global.relay.metered.ca:443?transport=tcp"
-      ],
-      username: "fa7eef2ae84da22593524042",
-      credential: "p4ASfEtlTCl7rLlc"
+      // Optional local fallback if TURN token endpoint is unavailable.
+      urls: [],
+      username: "",
+      credential: ""
     };
 
     const COLORS = {
@@ -319,48 +315,30 @@
         const makeRoomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
         const buildPeerOptions = async () => {
-          const iceServers = [
-            { urls: ["stun:stun.relay.metered.ca:80", "stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }
-          ];
+          const defaultStun = { urls: ["stun:stun.relay.metered.ca:80", "stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] };
 
-          if (TURN_PROVIDER.username && TURN_PROVIDER.credential && TURN_PROVIDER.urls && TURN_PROVIDER.urls.length) {
-            iceServers.unshift({
-              urls: TURN_PROVIDER.urls,
-              username: TURN_PROVIDER.username,
-              credential: TURN_PROVIDER.credential
-            });
-          } else {
+          if (TURN_TOKEN_ENDPOINT) {
             try {
-              const username = `${Math.floor(Date.now() / 1000) + 24 * 3600}:codextest`;
-              const enc = new TextEncoder();
-              const key = await crypto.subtle.importKey(
-                "raw",
-                enc.encode("openrelayprojectsecret"),
-                { name: "HMAC", hash: "SHA-1" },
-                false,
-                ["sign"]
-              );
-              const sig = await crypto.subtle.sign("HMAC", key, enc.encode(username));
-              const bytes = new Uint8Array(sig);
-              let raw = "";
-              for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
-              iceServers.unshift({
-                urls: [
-                  "turn:staticauth.openrelay.metered.ca:80?transport=udp",
-                  "turn:staticauth.openrelay.metered.ca:80?transport=tcp",
-                  "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
-                  "turns:staticauth.openrelay.metered.ca:443?transport=tcp"
-                ],
-                username,
-                credential: btoa(raw)
-              });
+              const res = await fetch(TURN_TOKEN_ENDPOINT, { method: "GET" });
+              if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data.iceServers) && data.iceServers.length) {
+                  const hasStun = data.iceServers.some((s) => {
+                    const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+                    return urls.some((u) => typeof u === "string" && u.startsWith("stun:"));
+                  });
+                  if (!hasStun) data.iceServers.unshift(defaultStun);
+                  return { config: { iceServers: data.iceServers } };
+                }
+              }
             } catch {
-              iceServers.unshift({
-                urls: ["turn:openrelay.metered.ca:80?transport=tcp"],
-                username: "openrelayproject",
-                credential: "openrelayproject"
-              });
+              // Fall through to local fallback providers.
             }
+          }
+
+          const iceServers = [defaultStun];
+          if (TURN_PROVIDER.username && TURN_PROVIDER.credential && TURN_PROVIDER.urls && TURN_PROVIDER.urls.length) {
+            iceServers.unshift({ urls: TURN_PROVIDER.urls, username: TURN_PROVIDER.username, credential: TURN_PROVIDER.credential });
           }
 
           return { config: { iceServers } };

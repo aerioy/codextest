@@ -1,0 +1,12 @@
+name = "ink-soccer-turn-token"
+main = "src/index.ts"
+compatibility_date = "2026-02-26"
+
+[observability.logs]
+enabled = true
+
+[vars]
+ALLOWED_ORIGIN = "https://aerioy.github.io"
+TURN_URLS = "turn:global.relay.metered.ca:80,turn:global.relay.metered.ca:80?transport=tcp,turn:global.relay.metered.ca:443,turns:global.relay.metered.ca:443?transport=tcp"
+STUN_URLS = "stun:stun.relay.metered.ca:80,stun:stun.l.google.com:19302"
+TOKEN_TTL_SECONDS = "3600"
