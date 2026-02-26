@@ -87,7 +87,7 @@
     const COLORS = {
       bgTop: 0x111f2f, bgBottom: 0x070c14,
       pitch: 0x12564a, pitchInner: 0x0e423a,
-      line: 0xc8f5f0, goal: 0x5adcff,
+      line: 0xc8f5f0, goalFrame: 0x89e6ff, goalGlow: 0x2fc8ff, goalNet: 0x7ce6ff,
       ball: 0xf5faff, ballStroke: 0x142028,
       boost: 0x41e676, boostHint: 0x88f0ad, boostArrow: 0x0b7c36,
       barrierLeft: 0xff6e80, barrierRight: 0x5aa9ff,
@@ -740,9 +740,15 @@
 
         g.fillGradientStyle(COLORS.bgTop, COLORS.bgTop, COLORS.bgBottom, COLORS.bgBottom, 1);
         g.fillRect(0, 0, WIDTH, HEIGHT);
+        g.fillStyle(0x2a5d8f, 0.12); g.fillCircle(WIDTH * 0.18, HEIGHT * 0.14, 170);
+        g.fillStyle(0x1f7c68, 0.10); g.fillCircle(WIDTH * 0.82, HEIGHT * 0.2, 150);
 
         g.fillStyle(COLORS.pitch, 1);
         g.fillRoundedRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, FIELD_CORNER_RADIUS);
+        g.lineStyle(1, 0xd9fff6, 0.07);
+        for (let yy = FIELD_TOP + 10; yy < FIELD_BOTTOM; yy += 24) {
+          g.beginPath(); g.moveTo(FIELD_LEFT + 16, yy); g.lineTo(FIELD_RIGHT - 16, yy); g.strokePath();
+        }
         g.lineStyle(2, COLORS.pitchInner, 1);
         g.strokeRoundedRect(FIELD_LEFT + 9, FIELD_TOP + 9, (FIELD_RIGHT - FIELD_LEFT) - 18, (FIELD_BOTTOM - FIELD_TOP) - 18, FIELD_CORNER_RADIUS - 10);
         g.lineStyle(3, COLORS.line, 1);
@@ -751,11 +757,38 @@
         g.beginPath(); g.moveTo(WIDTH * 0.5, FIELD_TOP + 12); g.lineTo(WIDTH * 0.5, FIELD_BOTTOM - 12); g.strokePath();
         g.strokeCircle(WIDTH * 0.5, HEIGHT * 0.5, 70);
 
-        g.lineStyle(3, COLORS.goal, 1);
-        g.strokeRect(FIELD_LEFT - GOAL_DEPTH, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
-        g.strokeRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
-        g.lineStyle(4, COLORS.goal, 1);
+        const leftBackX = FIELD_LEFT - GOAL_DEPTH;
+        const rightBackX = GOAL_LINE_X_RIGHT + GOAL_DEPTH;
+
+        g.fillStyle(COLORS.goalNet, 0.12);
+        g.fillRoundedRect(leftBackX, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
+        g.fillRoundedRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
+
+        g.lineStyle(8, COLORS.goalGlow, 0.20);
+        g.beginPath();
+        g.moveTo(GOAL_LINE_X_LEFT, GOAL_TOP); g.lineTo(GOAL_LINE_X_LEFT, GOAL_BOTTOM);
+        g.moveTo(GOAL_LINE_X_RIGHT, GOAL_TOP); g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM);
+        g.strokePath();
+
+        g.lineStyle(3, COLORS.goalFrame, 0.95);
+        g.strokeRoundedRect(leftBackX, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
+        g.strokeRoundedRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
+        g.lineStyle(5, COLORS.goalFrame, 1);
         g.beginPath(); g.moveTo(GOAL_LINE_X_LEFT, GOAL_TOP); g.lineTo(GOAL_LINE_X_LEFT, GOAL_BOTTOM); g.moveTo(GOAL_LINE_X_RIGHT, GOAL_TOP); g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM); g.strokePath();
+
+        g.lineStyle(1, COLORS.goalNet, 0.35);
+        for (let yy = GOAL_TOP + 8; yy < GOAL_BOTTOM; yy += 14) {
+          g.beginPath();
+          g.moveTo(leftBackX + 3, yy); g.lineTo(GOAL_LINE_X_LEFT - 2, yy);
+          g.moveTo(GOAL_LINE_X_RIGHT + 2, yy); g.lineTo(rightBackX - 3, yy);
+          g.strokePath();
+        }
+        for (let xx = leftBackX + 5; xx < GOAL_LINE_X_LEFT - 3; xx += 8) {
+          g.beginPath(); g.moveTo(xx, GOAL_TOP + 3); g.lineTo(xx, GOAL_BOTTOM - 3); g.strokePath();
+        }
+        for (let xx = GOAL_LINE_X_RIGHT + 4; xx < rightBackX - 4; xx += 8) {
+          g.beginPath(); g.moveTo(xx, GOAL_TOP + 3); g.lineTo(xx, GOAL_BOTTOM - 3); g.strokePath();
+        }
 
         zg.fillStyle(COLORS.zoneFill, 0.42);
         zg.fillRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
