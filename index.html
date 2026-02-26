@@ -76,6 +76,7 @@
     const STALL_SPEED_THRESHOLD = 20.0;
     const STALL_TIME_TO_NUDGE = 0.65;
     const STALL_NUDGE_IMPULSE = 170.0;
+    const WAITING_TOUCH_TIMEOUT = 4.0;
 
     const BACKEND_WS_ORIGIN = "https://ink-soccer-realtime.amiragrama-35d.workers.dev"; // Managed realtime backend
 
@@ -164,6 +165,7 @@
         this.shieldEnd = 0;
         this.zoneStallTimer = 0;
         this.lastCountdownVal = null;
+        this.waitingTouchStart = 0;
 
         this.leftZone = { x: GOAL_LINE_X_LEFT - BOOST_BLOCK_DEPTH * 0.5, y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5, w: BOOST_BLOCK_DEPTH, h: BOOST_BLOCK_HEIGHT };
         this.rightZone = { x: GOAL_LINE_X_RIGHT - BOOST_BLOCK_DEPTH * 0.5, y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5, w: BOOST_BLOCK_DEPTH, h: BOOST_BLOCK_HEIGHT };
@@ -339,8 +341,11 @@
           this.barriers = s.barriers;
           this.inkUsed = s.inkUsed;
           this.kickoffSide = s.kickoffSide;
+          const prevPhase = this.kickoffPhase;
           this.kickoffPhase = s.kickoffPhase;
           const now = this.now();
+          if (this.kickoffPhase === 'waiting_touch' && prevPhase !== 'waiting_touch') this.waitingTouchStart = now;
+          if (this.kickoffPhase !== 'waiting_touch') this.waitingTouchStart = 0;
           this.kickoffCountdownEnd = now + s.countdownRemaining;
           this.shieldEnd = now + s.shieldRemaining;
           this.ctrl.left = s.ctrl.left;
@@ -489,6 +494,7 @@
         this.kickoffCountdownEnd = now + KICKOFF_COUNTDOWN;
         this.shieldEnd = 0;
         this.lastCountdownVal = null;
+        this.waitingTouchStart = 0;
         this.ballPos = { x: concedingSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75, y: GOAL_CENTER_Y };
         this.ballVel = { x: 0, y: 0 };
       }
@@ -656,12 +662,13 @@
             this.ballPos.x = this.kickoffSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75;
             this.ballPos.y = GOAL_CENTER_Y;
             this.ballVel.x = 0; this.ballVel.y = 0;
-            if (now >= this.kickoffCountdownEnd) this.kickoffPhase = 'waiting_touch';
+            if (now >= this.kickoffCountdownEnd) { this.kickoffPhase = 'waiting_touch'; this.waitingTouchStart = now; }
           } else if (this.kickoffPhase === 'waiting_touch') {
             this.ballPos.x = this.kickoffSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75;
             this.ballPos.y = GOAL_CENTER_Y;
             this.ballVel.x = 0; this.ballVel.y = 0;
             this.applyBoost(now);
+            if (now - this.waitingTouchStart >= WAITING_TOUCH_TIMEOUT) this.kickoffPhase = 'live';
           } else {
             this.ballPos.x += this.ballVel.x * dt;
             this.ballPos.y += this.ballVel.y * dt;
@@ -675,6 +682,7 @@
             this.collideShields(now);
             if (!this.collideField(now)) {
               this.applyBoost(now);
+            if (now - this.waitingTouchStart >= WAITING_TOUCH_TIMEOUT) this.kickoffPhase = 'live';
               for (const b of this.barriers) this.collideBarrier(b);
             }
           }
@@ -786,7 +794,7 @@
           this.kickText.setText(String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now))));
           this.kickText.setVisible(true);
         } else if (this.kickoffPhase === 'waiting_touch') {
-          this.kickText.setText('GO'); this.kickText.setVisible(true);
+          this.kickText.setText(`GO ${(WAITING_TOUCH_TIMEOUT - Math.max(0, now - this.waitingTouchStart)).toFixed(1)}s`); this.kickText.setVisible(true);
         } else this.kickText.setVisible(false);
 
         if (this.shieldActive(now)) {
