@@ -1009,7 +1009,7 @@
       }
     }
 
-    new Phaser.Game({
+    const game = new Phaser.Game({
       type: Phaser.WEBGL,
       width: WIDTH,
       height: HEIGHT,
@@ -1022,12 +1022,29 @@
       roundPixels: false,
       resolution: RENDER_RESOLUTION,
       scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
+        mode: Phaser.Scale.NONE,
         width: WIDTH,
         height: HEIGHT
       }
     });
+
+    function layoutCanvas() {
+      const canvas = game.canvas;
+      if (!canvas) return;
+      const s = Math.min(window.innerWidth / WIDTH, window.innerHeight / HEIGHT);
+      const w = Math.max(1, Math.floor(WIDTH * s));
+      const h = Math.max(1, Math.floor(HEIGHT * s));
+      const x = Math.floor((window.innerWidth - w) * 0.5);
+      const y = Math.floor((window.innerHeight - h) * 0.5);
+      canvas.style.position = 'fixed';
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      canvas.style.left = `${x}px`;
+      canvas.style.top = `${y}px`;
+    }
+
+    window.addEventListener('resize', layoutCanvas);
+    setTimeout(layoutCanvas, 0);
   </script>
 </body>
 </html>
