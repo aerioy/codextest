@@ -38,15 +38,18 @@
     const WIDTH = 1100;
     const HEIGHT = 650;
 
-    const FIELD_MARGIN = 40;
+    const FIELD_LEFT = 40;
+    const FIELD_RIGHT = WIDTH - 40;
+    const FIELD_TOP = 96;
+    const FIELD_BOTTOM = HEIGHT - 40;
     const FIELD_CORNER_RADIUS = 92;
     const GOAL_OPENING = 246;
     const GOAL_DEPTH = 30;
-    const GOAL_LINE_X_LEFT = FIELD_MARGIN;
-    const GOAL_LINE_X_RIGHT = WIDTH - FIELD_MARGIN;
-    const GOAL_TOP = HEIGHT * 0.5 - GOAL_OPENING * 0.5;
-    const GOAL_BOTTOM = HEIGHT * 0.5 + GOAL_OPENING * 0.5;
-    const GOAL_CENTER_Y = HEIGHT * 0.5;
+    const GOAL_LINE_X_LEFT = FIELD_LEFT;
+    const GOAL_LINE_X_RIGHT = FIELD_RIGHT;
+    const GOAL_CENTER_Y = (FIELD_TOP + FIELD_BOTTOM) * 0.5;
+    const GOAL_TOP = GOAL_CENTER_Y - GOAL_OPENING * 0.5;
+    const GOAL_BOTTOM = GOAL_CENTER_Y + GOAL_OPENING * 0.5;
 
     const BALL_RADIUS = 14;
     const BALL_DAMPING = 0.995;
@@ -132,12 +135,12 @@
 
         this.maskSrc = this.make.graphics({ x: 0, y: 0, add: false });
         this.maskSrc.fillStyle(0xffffff, 1);
-        this.maskSrc.fillRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN);
+        this.maskSrc.fillRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP);
         this.zoneG.setMask(this.maskSrc.createGeometryMask());
 
         this.scoreText = this.add.text(WIDTH / 2, 28, '0 : 0', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '52px', color: '#e4f4ff', fontStyle: '700' }).setOrigin(0.5, 0);
         this.leftTagText = this.add.text(WIDTH / 2 - 182, 56, 'Me', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
-        this.rightTagText = this.add.text(WIDTH / 2 + 182, 56, 'Them', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
+        this.rightTagText = this.add.text(WIDTH / 2 + 182, 56, 'Opponent', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#9cc2d6', fontStyle: '700' }).setOrigin(0.5, 0);
         this.kickText = this.add.text(WIDTH / 2, HEIGHT / 2 - 140, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '34px', color: '#a0f0ff', fontStyle: '700' }).setOrigin(0.5);
         this.shieldText = this.add.text(WIDTH / 2, 98, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#ffbe74' }).setOrigin(0.5);
         this.hintText = this.add.text(WIDTH / 2, HEIGHT - 20, 'L-drag: boost  R-drag: wall  R: reset', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' }).setOrigin(0.5);
@@ -589,7 +592,7 @@
       }
 
       collideField(now) {
-        const left = FIELD_MARGIN, right = WIDTH - FIELD_MARGIN, top = FIELD_MARGIN, bottom = HEIGHT - FIELD_MARGIN, corner = FIELD_CORNER_RADIUS;
+        const left = FIELD_LEFT, right = FIELD_RIGHT, top = FIELD_TOP, bottom = FIELD_BOTTOM, corner = FIELD_CORNER_RADIUS;
         const inGoal = this.ballPos.y >= GOAL_TOP && this.ballPos.y <= GOAL_BOTTOM;
         if (this.ballPos.x - BALL_RADIUS < GOAL_LINE_X_LEFT && inGoal) { this.goal(true, now); return true; }
         if (this.ballPos.x + BALL_RADIUS > GOAL_LINE_X_RIGHT && inGoal) { this.goal(false, now); return true; }
@@ -656,7 +659,7 @@
             this.ballPos.y = GOAL_CENTER_Y;
             this.ballVel.x = 0; this.ballVel.y = 0;
             this.applyBoost(now);
-            if (now - this.waitingTouchStart >= WAITING_TOUCH_TIMEOUT) this.kickoffPhase = 'live';
+            if (now - this.waitingTouchStart >= WAITING_TOUCH_TIMEOUT) { this.kickoffPhase = 'live'; this.shieldEnd = now + GOAL_SHIELD_DURATION; }
           } else {
             this.ballPos.x += this.ballVel.x * dt;
             this.ballPos.y += this.ballVel.y * dt;
@@ -670,7 +673,6 @@
             this.collideShields(now);
             if (!this.collideField(now)) {
               this.applyBoost(now);
-            if (now - this.waitingTouchStart >= WAITING_TOUCH_TIMEOUT) this.kickoffPhase = 'live';
               for (const b of this.barriers) this.collideBarrier(b);
             }
           }
@@ -692,17 +694,17 @@
         g.fillRect(0, 0, WIDTH, HEIGHT);
 
         g.fillStyle(COLORS.pitch, 1);
-        g.fillRoundedRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN, FIELD_CORNER_RADIUS);
+        g.fillRoundedRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, FIELD_CORNER_RADIUS);
         g.lineStyle(2, COLORS.pitchInner, 1);
-        g.strokeRoundedRect(FIELD_MARGIN + 9, FIELD_MARGIN + 9, WIDTH - 2 * FIELD_MARGIN - 18, HEIGHT - 2 * FIELD_MARGIN - 18, FIELD_CORNER_RADIUS - 10);
+        g.strokeRoundedRect(FIELD_LEFT + 9, FIELD_TOP + 9, (FIELD_RIGHT - FIELD_LEFT) - 18, (FIELD_BOTTOM - FIELD_TOP) - 18, FIELD_CORNER_RADIUS - 10);
         g.lineStyle(3, COLORS.line, 1);
-        g.strokeRoundedRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN, FIELD_CORNER_RADIUS);
+        g.strokeRoundedRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, FIELD_CORNER_RADIUS);
         g.lineStyle(2, 0x96e1d7, 1);
-        g.beginPath(); g.moveTo(WIDTH * 0.5, FIELD_MARGIN + 12); g.lineTo(WIDTH * 0.5, HEIGHT - FIELD_MARGIN - 12); g.strokePath();
+        g.beginPath(); g.moveTo(WIDTH * 0.5, FIELD_TOP + 12); g.lineTo(WIDTH * 0.5, FIELD_BOTTOM - 12); g.strokePath();
         g.strokeCircle(WIDTH * 0.5, HEIGHT * 0.5, 70);
 
         g.lineStyle(3, COLORS.goal, 1);
-        g.strokeRect(FIELD_MARGIN - GOAL_DEPTH, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
+        g.strokeRect(FIELD_LEFT - GOAL_DEPTH, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
         g.strokeRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
         g.lineStyle(4, COLORS.goal, 1);
         g.beginPath(); g.moveTo(GOAL_LINE_X_LEFT, GOAL_TOP); g.lineTo(GOAL_LINE_X_LEFT, GOAL_BOTTOM); g.moveTo(GOAL_LINE_X_RIGHT, GOAL_TOP); g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM); g.strokePath();
@@ -766,7 +768,7 @@
 
         this.scoreText.setText(`${this.leftScore} : ${this.rightScore}`);
         const dots = '.'.repeat((Math.floor(now * 2) % 3) + 1);
-        const themText = this.connectionOpen ? 'Them' : `Them${dots}`;
+        const themText = this.connectionOpen ? 'Opponent' : `Opponent${dots}`;
         if (this.playerSide === 'left') {
           this.leftTagText.setText('Me');
           this.rightTagText.setText(themText);
@@ -775,7 +777,7 @@
           this.rightTagText.setText('Me');
         }
         this.inkPct.setText(`${Math.floor(rem * 100)}%`);
-        this.netHintText.setText(this.connectionOpen ? 'Them joined' : 'Waiting for them to join...');
+        this.netHintText.setText(this.connectionOpen ? 'Opponent joined' : 'Waiting for opponent...');
         this.roomText.setText(`Room ${this.net.roomCode || '-'} | ${this.net.host ? 'Host' : 'Join'}`);
 
         if (this.kickoffPhase === 'countdown') {
