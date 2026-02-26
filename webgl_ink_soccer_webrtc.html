@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ink Soccer WebGL WebRTC</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 20% 20%, #16273a 0%, #0b1320 45%, #070c14 100%);
+      overflow: hidden;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: #e4f4ff;
+    }
+    #game {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+    }
+    canvas {
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+      width: min(98vw, calc(98vh * 1.6923));
+      height: auto;
+      max-width: none;
+      max-height: none;
+    }
+    #net {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: min(430px, 92vw);
+      background: rgba(10, 24, 35, 0.92);
+      border: 2px solid rgba(84, 186, 220, 0.52);
+      border-radius: 12px;
+      padding: 10px;
+      backdrop-filter: blur(6px);
+      z-index: 10;
+      font-size: 13px;
+    }
+    #net textarea {
+      width: 100%;
+      height: 72px;
+      resize: vertical;
+      border-radius: 8px;
+      border: 1px solid rgba(130, 170, 190, 0.7);
+      background: rgba(4, 10, 14, 0.8);
+      color: #d8f0ff;
+      margin-top: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      padding: 6px;
+      box-sizing: border-box;
+    }
+    #net .row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    #net button {
+      border: 1px solid rgba(120, 180, 210, 0.8);
+      background: rgba(21, 45, 62, 0.9);
+      color: #d7f1ff;
+      border-radius: 8px;
+      padding: 6px 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #net .muted { color: #9cc2d6; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+</head>
+<body>
+  <div id="game"></div>
+  <div id="net">
+    <div><strong>WebRTC Multiplayer</strong> <span id="role" class="muted">(not connected)</span></div>
+    <div class="row">
+      <button id="hostBtn">Host (Player 1 Left)</button>
+      <button id="joinBtn">Join (Player 2 Right)</button>
+      <button id="copyLocalBtn">Copy Local SDP</button>
+      <button id="applyRemoteBtn">Apply Remote SDP</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Local SDP (send to peer):</div>
+    <textarea id="localSdp" readonly></textarea>
+    <div class="muted" style="margin-top:6px">Remote SDP (paste from peer):</div>
+    <textarea id="remoteSdp"></textarea>
+    <div id="status" class="muted" style="margin-top:6px">Disconnected</div>
+  </div>
+
+  <script>
+    const WIDTH = 1100;
+    const HEIGHT = 650;
+
+    const FIELD_MARGIN = 40;
+    const FIELD_CORNER_RADIUS = 92;
+    const GOAL_OPENING = 246;
+    const GOAL_DEPTH = 30;
+    const GOAL_LINE_X_LEFT = FIELD_MARGIN;
+    const GOAL_LINE_X_RIGHT = WIDTH - FIELD_MARGIN;
+    const GOAL_TOP = HEIGHT * 0.5 - GOAL_OPENING * 0.5;
+    const GOAL_BOTTOM = HEIGHT * 0.5 + GOAL_OPENING * 0.5;
+    const GOAL_CENTER_Y = HEIGHT * 0.5;
+
+    const BALL_RADIUS = 14;
+    const BALL_DAMPING = 0.995;
+    const BALL_MAX_SPEED = 1100;
+
+    const BOOST_PAD_THICKNESS = 8;
+    const BOOST_PAD_MIN_DRAG = 14;
+    const BOOST_PAD_MAX_LENGTH = BALL_RADIUS * 2 * 5;
+    const BOOST_IMPULSE_MIN = 200;
+    const BOOST_IMPULSE_MAX = 760;
+    const BOOST_COOLDOWN = 0.22;
+
+    const BARRIER_THICKNESS = 6;
+    const BARRIER_SEGMENT_STEP = 8;
+    const BARRIER_LIFETIME = 2.0;
+    const MAX_INK_LENGTH = GOAL_OPENING * 0.34;
+
+    const KICKOFF_COUNTDOWN = 3.0;
+    const GOAL_SHIELD_DURATION = 3.0;
+    const SHIELD_RADIUS = 120;
+    const SHIELD_INSET_X = 28;
+
+    const BOOST_BLOCK_HEIGHT = Math.floor(GOAL_OPENING * 1.5);
+    const BOOST_BLOCK_DEPTH = Math.floor(GOAL_OPENING * 0.75);
+    const BOOST_BLOCK_RADIUS = Math.min(Math.floor(BOOST_BLOCK_DEPTH / 2), Math.floor(BOOST_BLOCK_HEIGHT / 2) - 4);
+    const BOOST_ZONE_MULTIPLIER = 0.30;
+    const STALL_SPEED_THRESHOLD = 20.0;
+    const STALL_TIME_TO_NUDGE = 0.65;
+    const STALL_NUDGE_IMPULSE = 170.0;
+
+    const COLORS = {
+      bgTop: 0x111f2f, bgBottom: 0x070c14,
+      pitch: 0x12564a, pitchInner: 0x0e423a,
+      line: 0xc8f5f0, goal: 0x5adcff,
+      ball: 0xf5faff, ballStroke: 0x142028,
+      boost: 0x42caff, boostHint: 0x78a0be,
+      barrier: 0xff6e80,
+      shieldFill: 0xffa546, shieldEdge: 0xffbe74,
+      zoneFill: 0xff3737, zoneEdge: 0xff6b6b,
+      panel: 0x0a1823, panelEdge: 0x54badc
+    };
+
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const normalize = (x, y) => { const d = Math.hypot(x, y); return d <= 1e-9 ? { x: 0, y: 0 } : { x: x / d, y: y / d }; };
+
+    function distancePointToSegment(p, a, b) {
+      const apx = p.x - a.x, apy = p.y - a.y;
+      const abx = b.x - a.x, aby = b.y - a.y;
+      const ab2 = abx * abx + aby * aby;
+      if (ab2 <= 1e-9) return { d: Math.hypot(apx, apy), closest: { x: a.x, y: a.y } };
+      const t = clamp((apx * abx + apy * aby) / ab2, 0, 1);
+      const c = { x: a.x + abx * t, y: a.y + aby * t };
+      return { d: Math.hypot(p.x - c.x, p.y - c.y), closest: c };
+    }
+
+    function pointInRoundedRect(p, r, rad) {
+      if (p.x < r.x || p.x > r.x + r.w || p.y < r.y || p.y > r.y + r.h) return false;
+      const cx = clamp(p.x, r.x + rad, r.x + r.w - rad);
+      const cy = clamp(p.y, r.y + rad, r.y + r.h - rad);
+      const dx = p.x - cx, dy = p.y - cy;
+      return dx * dx + dy * dy <= rad * rad;
+    }
+
+    function clampDrag(a, b, maxLen) {
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= maxLen || d <= 1e-9) return { x: b.x, y: b.y };
+      const s = maxLen / d;
+      return { x: a.x + dx * s, y: a.y + dy * s };
+    }
+
+    class Scene extends Phaser.Scene {
+      constructor() { super('s'); }
+      now() { return this.time.now / 1000; }
+
+      create() {
+        this.g = this.add.graphics();
+        this.zoneG = this.add.graphics();
+        this.ui = this.add.graphics();
+
+        this.maskSrc = this.make.graphics({ x: 0, y: 0, add: false });
+        this.maskSrc.fillStyle(0xffffff, 1);
+        this.maskSrc.fillRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN);
+        this.zoneG.setMask(this.maskSrc.createGeometryMask());
+
+        this.scoreText = this.add.text(WIDTH / 2, 28, '0 : 0', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '52px', color: '#e4f4ff', fontStyle: '700' }).setOrigin(0.5, 0);
+        this.kickText = this.add.text(WIDTH / 2, HEIGHT / 2 - 140, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '34px', color: '#a0f0ff', fontStyle: '700' }).setOrigin(0.5);
+        this.shieldText = this.add.text(WIDTH / 2, 98, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#ffbe74' }).setOrigin(0.5);
+        this.hintText = this.add.text(WIDTH / 2, HEIGHT - 20, 'L-drag: boost  R-drag: wall  R: reset', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' }).setOrigin(0.5);
+
+        this.inkLabel = this.add.text(WIDTH - 274, 22, 'INK', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' });
+        this.inkPct = this.add.text(WIDTH - 34, 66, '100%', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#e4f4ff' }).setOrigin(1, 0);
+
+        this.playerSide = 'left';
+        this.isAuthoritative = true;
+        this.connectionOpen = false;
+
+        this.leftScore = 0; this.rightScore = 0;
+        this.ballPos = { x: WIDTH * 0.5, y: HEIGHT * 0.5 };
+        this.ballVel = { x: 0, y: 0 };
+        this.boostPad = null;
+        this.lastBoostTime = -10;
+        this.barriers = [];
+        this.inkUsed = 0;
+
+        this.kickoffSide = 'left';
+        this.kickoffPhase = 'countdown';
+        this.kickoffCountdownEnd = 0;
+        this.shieldEnd = 0;
+        this.zoneStallTimer = 0;
+        this.lastCountdownVal = null;
+
+        this.leftZone = { x: GOAL_LINE_X_LEFT - BOOST_BLOCK_DEPTH * 0.5, y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5, w: BOOST_BLOCK_DEPTH, h: BOOST_BLOCK_HEIGHT };
+        this.rightZone = { x: GOAL_LINE_X_RIGHT - BOOST_BLOCK_DEPTH * 0.5, y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5, w: BOOST_BLOCK_DEPTH, h: BOOST_BLOCK_HEIGHT };
+
+        this.ctrl = {
+          left: { lStart: null, lCur: null, rDraw: false, rLast: null, pointer: { x: 0, y: 0 } },
+          right:{ lStart: null, lCur: null, rDraw: false, rLast: null, pointer: { x: 0, y: 0 } }
+        };
+
+        this.net = { pc: null, dc: null, host: false, lastStateTx: 0 };
+        this.setupNetUI();
+
+        this.startKickoff(this.now(), 'left');
+
+        this.input.mouse.disableContextMenu();
+        this.input.on('pointerdown', (p) => this.handlePointerDown(this.playerSide, p));
+        this.input.on('pointermove', (p) => this.handlePointerMove(this.playerSide, p));
+        this.input.on('pointerup', (p) => this.handlePointerUp(this.playerSide, p));
+        this.input.keyboard.on('keydown-R', () => this.handleReset(this.playerSide));
+      }
+
+      status(msg) { document.getElementById('status').textContent = msg; }
+
+      setupNetUI() {
+        const roleEl = document.getElementById('role');
+        const local = document.getElementById('localSdp');
+        const remote = document.getElementById('remoteSdp');
+
+        const waitIce = (pc) => new Promise((resolve) => {
+          if (pc.iceGatheringState === 'complete') return resolve();
+          const cb = () => {
+            if (pc.iceGatheringState === 'complete') {
+              pc.removeEventListener('icegatheringstatechange', cb);
+              resolve();
+            }
+          };
+          pc.addEventListener('icegatheringstatechange', cb);
+        });
+
+        const initPC = async (hostMode) => {
+          this.net.host = hostMode;
+          this.net.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+          this.net.pc.onconnectionstatechange = () => this.status(`PC: ${this.net.pc.connectionState}`);
+
+          if (hostMode) {
+            this.net.dc = this.net.pc.createDataChannel('game');
+            this.bindDC(this.net.dc);
+            const offer = await this.net.pc.createOffer();
+            await this.net.pc.setLocalDescription(offer);
+            await waitIce(this.net.pc);
+            local.value = JSON.stringify(this.net.pc.localDescription);
+            roleEl.textContent = '(Host / Player 1 Left)';
+            this.playerSide = 'left';
+            this.isAuthoritative = true;
+            this.status('Host SDP ready. Send Local SDP to joiner.');
+          } else {
+            this.net.pc.ondatachannel = (ev) => {
+              this.net.dc = ev.channel;
+              this.bindDC(this.net.dc);
+            };
+            roleEl.textContent = '(Join / Player 2 Right)';
+            this.playerSide = 'right';
+            this.isAuthoritative = false;
+            this.status('Paste host offer then click Apply Remote SDP.');
+          }
+        };
+
+        document.getElementById('hostBtn').onclick = async () => {
+          await initPC(true);
+        };
+
+        document.getElementById('joinBtn').onclick = async () => {
+          await initPC(false);
+        };
+
+        document.getElementById('copyLocalBtn').onclick = async () => {
+          if (!local.value) return;
+          await navigator.clipboard.writeText(local.value);
+          this.status('Local SDP copied.');
+        };
+
+        document.getElementById('applyRemoteBtn').onclick = async () => {
+          if (!this.net.pc) return;
+          const txt = remote.value.trim();
+          if (!txt) return;
+          const desc = JSON.parse(txt);
+
+          if (this.net.host) {
+            await this.net.pc.setRemoteDescription(desc);
+            this.status('Answer applied. Waiting for data channel...');
+          } else {
+            await this.net.pc.setRemoteDescription(desc);
+            const answer = await this.net.pc.createAnswer();
+            await this.net.pc.setLocalDescription(answer);
+            await waitIce(this.net.pc);
+            local.value = JSON.stringify(this.net.pc.localDescription);
+            this.status('Answer SDP ready. Send Local SDP back to host.');
+          }
+        };
+      }
+
+      bindDC(dc) {
+        dc.onopen = () => {
+          this.connectionOpen = true;
+          this.status('Connected (DataChannel open)');
+        };
+        dc.onclose = () => {
+          this.connectionOpen = false;
+          this.status('DataChannel closed');
+        };
+        dc.onmessage = (ev) => this.onNetMessage(ev.data);
+      }
+
+      send(msg) {
+        if (!this.net.dc || this.net.dc.readyState !== 'open') return;
+        this.net.dc.send(JSON.stringify(msg));
+      }
+
+      onNetMessage(raw) {
+        let m;
+        try { m = JSON.parse(raw); } catch { return; }
+
+        if (m.t === 'input' && this.isAuthoritative) {
+          this.applyInputEvent('right', m.e);
+          return;
+        }
+
+        if (m.t === 'state' && !this.isAuthoritative) {
+          const s = m.s;
+          this.leftScore = s.leftScore; this.rightScore = s.rightScore;
+          this.ballPos = s.ballPos; this.ballVel = s.ballVel;
+          this.boostPad = s.boostPad;
+          this.barriers = s.barriers;
+          this.inkUsed = s.inkUsed;
+          this.kickoffSide = s.kickoffSide;
+          this.kickoffPhase = s.kickoffPhase;
+          const now = this.now();
+          this.kickoffCountdownEnd = now + s.countdownRemaining;
+          this.shieldEnd = now + s.shieldRemaining;
+          this.ctrl.left = s.ctrl.left;
+          this.ctrl.right = s.ctrl.right;
+        }
+      }
+
+      serializeState(now) {
+        return {
+          leftScore: this.leftScore,
+          rightScore: this.rightScore,
+          ballPos: this.ballPos,
+          ballVel: this.ballVel,
+          boostPad: this.boostPad,
+          barriers: this.barriers,
+          inkUsed: this.inkUsed,
+          kickoffSide: this.kickoffSide,
+          kickoffPhase: this.kickoffPhase,
+          countdownRemaining: Math.max(0, this.kickoffCountdownEnd - now),
+          shieldRemaining: Math.max(0, this.shieldEnd - now),
+          ctrl: this.ctrl
+        };
+      }
+
+      ctrlFor(side) { return this.ctrl[side]; }
+
+      canSideInteract(side, p) {
+        if (this.kickoffPhase === 'countdown') return false;
+        if (this.kickoffPhase === 'waiting_touch') {
+          if (side !== this.kickoffSide) return false;
+          const mid = WIDTH * 0.5;
+          return side === 'left' ? p.x <= mid : p.x >= mid;
+        }
+        return true;
+      }
+
+      handleReset(side) {
+        if (this.isAuthoritative) {
+          this.leftScore = 0; this.rightScore = 0;
+          this.clearDrawables();
+          this.startKickoff(this.now(), Math.random() < 0.5 ? 'left' : 'right');
+        } else {
+          this.send({ t: 'input', e: { k: 'reset' } });
+        }
+      }
+
+      handlePointerDown(side, p) {
+        if (!this.isAuthoritative) {
+          this.send({ t: 'input', e: { k: 'down', side, x: p.x, y: p.y, l: p.leftButtonDown(), r: p.rightButtonDown() } });
+          return;
+        }
+        this.applyInputEvent(side, { k: 'down', x: p.x, y: p.y, l: p.leftButtonDown(), r: p.rightButtonDown() });
+      }
+
+      handlePointerMove(side, p) {
+        if (!this.isAuthoritative) {
+          this.send({ t: 'input', e: { k: 'move', side, x: p.x, y: p.y } });
+          return;
+        }
+        this.applyInputEvent(side, { k: 'move', x: p.x, y: p.y });
+      }
+
+      handlePointerUp(side, p) {
+        if (!this.isAuthoritative) {
+          this.send({ t: 'input', e: { k: 'up', side, x: p.x, y: p.y, l: p.leftButtonDown(), r: p.rightButtonDown() } });
+          return;
+        }
+        this.applyInputEvent(side, { k: 'up', x: p.x, y: p.y, l: p.leftButtonDown(), r: p.rightButtonDown() });
+      }
+
+      makeBoost(a, b) {
+        const end = clampDrag(a, b, BOOST_PAD_MAX_LENGTH);
+        const dx = end.x - a.x, dy = end.y - a.y;
+        const len = Math.hypot(dx, dy);
+        const dir = normalize(a.x - end.x, a.y - end.y);
+        return { a: { ...a }, b: { ...end }, length: len, dir, valid: len >= BOOST_PAD_MIN_DRAG && (dir.x * dir.x + dir.y * dir.y) > 0 };
+      }
+
+      pointInBoostZone(p) {
+        return pointInRoundedRect(p, this.leftZone, BOOST_BLOCK_RADIUS) || pointInRoundedRect(p, this.rightZone, BOOST_BLOCK_RADIUS);
+      }
+
+      boostAllowed(side, pad) {
+        if (!pad || !pad.valid) return false;
+        if (this.kickoffPhase === 'waiting_touch' && side !== this.kickoffSide) return false;
+        for (let i = 0; i <= 11; i++) {
+          const t = i / 11;
+          const p = { x: Phaser.Math.Linear(pad.a.x, pad.b.x, t), y: Phaser.Math.Linear(pad.a.y, pad.b.y, t) };
+          if (!this.canSideInteract(side, p)) return false;
+        }
+        return true;
+      }
+
+      applyInputEvent(side, e) {
+        if (e.k === 'reset') {
+          this.leftScore = 0; this.rightScore = 0;
+          this.clearDrawables();
+          this.startKickoff(this.now(), Math.random() < 0.5 ? 'left' : 'right');
+          return;
+        }
+
+        const c = this.ctrlFor(side);
+        c.pointer = { x: e.x, y: e.y };
+
+        if (e.k === 'down') {
+          const p = { x: e.x, y: e.y };
+          if (!this.canSideInteract(side, p)) return;
+          if (e.l) { c.lStart = { ...p }; c.lCur = { ...p }; }
+          if (e.r) { c.rDraw = true; c.rLast = { ...p }; }
+          return;
+        }
+
+        if (e.k === 'move') {
+          const p = { x: e.x, y: e.y };
+          if (c.lStart) c.lCur = { ...p };
+          if (c.rDraw && c.rLast) {
+            if (!this.canSideInteract(side, c.rLast) || !this.canSideInteract(side, p)) return;
+            this.addBarrierStroke(c.rLast, p, this.now());
+          }
+          return;
+        }
+
+        if (e.k === 'up') {
+          if (c.lStart && c.lCur) {
+            const cand = this.makeBoost(c.lStart, c.lCur);
+            this.boostPad = this.boostAllowed(side, cand) ? cand : null;
+            c.lStart = null; c.lCur = null;
+          }
+          c.rDraw = false; c.rLast = null;
+        }
+      }
+
+      clearDrawables() {
+        this.boostPad = null;
+        this.barriers = [];
+        this.inkUsed = 0;
+        for (const k of ['left', 'right']) {
+          this.ctrl[k].lStart = null; this.ctrl[k].lCur = null;
+          this.ctrl[k].rDraw = false; this.ctrl[k].rLast = null;
+        }
+      }
+
+      startKickoff(now, concedingSide) {
+        this.kickoffSide = concedingSide;
+        this.kickoffPhase = 'countdown';
+        this.kickoffCountdownEnd = now + KICKOFF_COUNTDOWN;
+        this.shieldEnd = 0;
+        this.lastCountdownVal = null;
+        this.ballPos = { x: concedingSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75, y: GOAL_CENTER_Y };
+        this.ballVel = { x: 0, y: 0 };
+      }
+
+      removeExpiredBarriers(now) {
+        const alive = [];
+        let used = 0;
+        for (const b of this.barriers) {
+          if (now - b.created < BARRIER_LIFETIME) { alive.push(b); used += b.length; }
+        }
+        this.barriers = alive; this.inkUsed = used;
+      }
+
+      addBarrierStroke(p0, p1, now) {
+        const dx = p1.x - p0.x, dy = p1.y - p0.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 1e-5) return;
+        const steps = Math.max(1, Math.floor(dist / BARRIER_SEGMENT_STEP));
+        let prev = { ...p0 };
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          const cur = { x: p0.x + dx * t, y: p0.y + dy * t };
+          const len = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+          if (this.inkUsed + len > MAX_INK_LENGTH) break;
+          this.barriers.push({ a: { ...prev }, b: { ...cur }, created: now, length: len });
+          this.inkUsed += len;
+          prev = cur;
+        }
+        for (const side of ['left','right']) {
+          if (this.ctrl[side].rDraw) this.ctrl[side].rLast = { ...prev };
+        }
+      }
+
+      applyBoost(now) {
+        if (!this.boostPad || !this.boostPad.valid) return;
+        if (now - this.lastBoostTime < BOOST_COOLDOWN) return;
+        const hit = distancePointToSegment(this.ballPos, this.boostPad.a, this.boostPad.b);
+        if (hit.d > BALL_RADIUS + BOOST_PAD_THICKNESS) return;
+
+        const ratio = clamp(this.boostPad.length / BOOST_PAD_MAX_LENGTH, 0, 1);
+        let impulse = BOOST_IMPULSE_MIN + ratio * (BOOST_IMPULSE_MAX - BOOST_IMPULSE_MIN);
+        if (this.pointInBoostZone(this.ballPos)) impulse *= BOOST_ZONE_MULTIPLIER;
+
+        this.ballVel.x += this.boostPad.dir.x * impulse;
+        this.ballVel.y += this.boostPad.dir.y * impulse;
+        const s = Math.hypot(this.ballVel.x, this.ballVel.y);
+        if (s > BALL_MAX_SPEED) { const k = BALL_MAX_SPEED / s; this.ballVel.x *= k; this.ballVel.y *= k; }
+        this.lastBoostTime = now;
+
+        if (this.kickoffPhase === 'waiting_touch') {
+          this.kickoffPhase = 'live';
+          this.shieldEnd = now + GOAL_SHIELD_DURATION;
+        }
+      }
+
+      shieldActive(now) { return now < this.shieldEnd; }
+
+      collideShields(now) {
+        if (!this.shieldActive(now)) return;
+        const centers = [
+          { x: GOAL_LINE_X_LEFT + SHIELD_INSET_X, y: GOAL_CENTER_Y },
+          { x: GOAL_LINE_X_RIGHT - SHIELD_INSET_X, y: GOAL_CENTER_Y }
+        ];
+        const R = SHIELD_RADIUS + BALL_RADIUS;
+        for (const c of centers) {
+          const rx = this.ballPos.x - c.x, ry = this.ballPos.y - c.y;
+          const d = Math.hypot(rx, ry);
+          if (d <= 1e-6 || d >= R) continue;
+          const nx = rx / d, ny = ry / d;
+          this.ballPos.x = c.x + nx * R;
+          this.ballPos.y = c.y + ny * R;
+          const vn = this.ballVel.x * nx + this.ballVel.y * ny;
+          if (vn < 0) {
+            this.ballVel.x -= 2.25 * vn * nx;
+            this.ballVel.y -= 2.25 * vn * ny;
+          }
+        }
+      }
+
+      collideBarrier(seg) {
+        const hit = distancePointToSegment(this.ballPos, seg.a, seg.b);
+        if (hit.d >= BALL_RADIUS + BARRIER_THICKNESS * 0.5) return;
+        let nx = this.ballPos.x - hit.closest.x, ny = this.ballPos.y - hit.closest.y;
+        const d = Math.hypot(nx, ny);
+        if (d <= 1e-9) {
+          const dx = seg.b.x - seg.a.x, dy = seg.b.y - seg.a.y;
+          const n = normalize(-dy, dx); nx = n.x; ny = n.y;
+        } else { nx /= d; ny /= d; }
+        const pen = BALL_RADIUS + BARRIER_THICKNESS * 0.5 - hit.d;
+        this.ballPos.x += nx * pen; this.ballPos.y += ny * pen;
+        const vn = this.ballVel.x * nx + this.ballVel.y * ny;
+        if (vn < 0) { this.ballVel.x -= 1.95 * vn * nx; this.ballVel.y -= 1.95 * vn * ny; }
+      }
+
+      reflect(nx, ny) {
+        const vn = this.ballVel.x * nx + this.ballVel.y * ny;
+        if (vn > 0) { this.ballVel.x -= 1.95 * vn * nx; this.ballVel.y -= 1.95 * vn * ny; }
+      }
+
+      goal(scorerRight, now) {
+        if (scorerRight) { this.rightScore += 1; this.startKickoff(now, 'left'); }
+        else { this.leftScore += 1; this.startKickoff(now, 'right'); }
+        this.clearDrawables();
+      }
+
+      collideField(now) {
+        const left = FIELD_MARGIN, right = WIDTH - FIELD_MARGIN, top = FIELD_MARGIN, bottom = HEIGHT - FIELD_MARGIN, corner = FIELD_CORNER_RADIUS;
+        const inGoal = this.ballPos.y >= GOAL_TOP && this.ballPos.y <= GOAL_BOTTOM;
+        if (this.ballPos.x - BALL_RADIUS < GOAL_LINE_X_LEFT && inGoal) { this.goal(true, now); return true; }
+        if (this.ballPos.x + BALL_RADIUS > GOAL_LINE_X_RIGHT && inGoal) { this.goal(false, now); return true; }
+
+        if (this.ballPos.x >= left + corner && this.ballPos.x <= right - corner && this.ballPos.y - BALL_RADIUS < top) { this.ballPos.y = top + BALL_RADIUS; this.reflect(0, -1); }
+        if (this.ballPos.x >= left + corner && this.ballPos.x <= right - corner && this.ballPos.y + BALL_RADIUS > bottom) { this.ballPos.y = bottom - BALL_RADIUS; this.reflect(0, 1); }
+
+        if (this.ballPos.y >= top + corner && this.ballPos.y <= GOAL_TOP && this.ballPos.x - BALL_RADIUS < left) { this.ballPos.x = left + BALL_RADIUS; this.reflect(-1,0); }
+        if (this.ballPos.y >= GOAL_BOTTOM && this.ballPos.y <= bottom - corner && this.ballPos.x - BALL_RADIUS < left) { this.ballPos.x = left + BALL_RADIUS; this.reflect(-1,0); }
+        if (this.ballPos.y >= top + corner && this.ballPos.y <= GOAL_TOP && this.ballPos.x + BALL_RADIUS > right) { this.ballPos.x = right - BALL_RADIUS; this.reflect(1,0); }
+        if (this.ballPos.y >= GOAL_BOTTOM && this.ballPos.y <= bottom - corner && this.ballPos.x + BALL_RADIUS > right) { this.ballPos.x = right - BALL_RADIUS; this.reflect(1,0); }
+
+        const corners = [
+          { c:{x:left+corner,y:top+corner}, z:(p)=>p.x<left+corner&&p.y<top+corner },
+          { c:{x:right-corner,y:top+corner}, z:(p)=>p.x>right-corner&&p.y<top+corner },
+          { c:{x:left+corner,y:bottom-corner}, z:(p)=>p.x<left+corner&&p.y>bottom-corner },
+          { c:{x:right-corner,y:bottom-corner}, z:(p)=>p.x>right-corner&&p.y>bottom-corner }
+        ];
+        const allowed = corner - BALL_RADIUS;
+        for (const k of corners) {
+          if (!k.z(this.ballPos)) continue;
+          const rx = this.ballPos.x - k.c.x, ry = this.ballPos.y - k.c.y;
+          const d = Math.hypot(rx, ry);
+          if (d <= 1e-6 || d <= allowed) continue;
+          const nx = rx / d, ny = ry / d;
+          this.ballPos.x = k.c.x + nx * allowed; this.ballPos.y = k.c.y + ny * allowed;
+          this.reflect(nx, ny);
+        }
+        return false;
+      }
+
+      stallNudge(dt) {
+        if (this.kickoffPhase !== 'live') { this.zoneStallTimer = 0; return; }
+        const sp = Math.hypot(this.ballVel.x, this.ballVel.y);
+        const inZone = this.pointInBoostZone(this.ballPos);
+        if (inZone && sp < STALL_SPEED_THRESHOLD) {
+          this.zoneStallTimer += dt;
+          if (this.zoneStallTimer >= STALL_TIME_TO_NUDGE) {
+            const leftSide = this.ballPos.x <= WIDTH * 0.5;
+            const center = leftSide ? { x: GOAL_LINE_X_LEFT, y: GOAL_CENTER_Y } : { x: GOAL_LINE_X_RIGHT, y: GOAL_CENTER_Y };
+            let n = normalize(this.ballPos.x - center.x, this.ballPos.y - center.y);
+            if (n.x === 0 && n.y === 0) n = leftSide ? { x: 1, y: 0 } : { x: -1, y: 0 };
+            this.ballVel.x += n.x * STALL_NUDGE_IMPULSE;
+            this.ballVel.y += n.y * STALL_NUDGE_IMPULSE;
+            this.zoneStallTimer = 0;
+          }
+        } else this.zoneStallTimer = 0;
+      }
+
+      update(_, dms) {
+        const dt = dms / 1000;
+        const now = this.now();
+
+        if (this.isAuthoritative) {
+          this.removeExpiredBarriers(now);
+
+          if (this.kickoffPhase === 'countdown') {
+            this.ballPos.x = this.kickoffSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75;
+            this.ballPos.y = GOAL_CENTER_Y;
+            this.ballVel.x = 0; this.ballVel.y = 0;
+            if (now >= this.kickoffCountdownEnd) this.kickoffPhase = 'waiting_touch';
+          } else if (this.kickoffPhase === 'waiting_touch') {
+            this.ballPos.x = this.kickoffSide === 'left' ? WIDTH * 0.25 : WIDTH * 0.75;
+            this.ballPos.y = GOAL_CENTER_Y;
+            this.ballVel.x = 0; this.ballVel.y = 0;
+            this.applyBoost(now);
+          } else {
+            this.ballPos.x += this.ballVel.x * dt;
+            this.ballPos.y += this.ballVel.y * dt;
+            this.ballVel.x *= BALL_DAMPING;
+            this.ballVel.y *= BALL_DAMPING;
+            this.stallNudge(dt);
+
+            const s = Math.hypot(this.ballVel.x, this.ballVel.y);
+            if (s > BALL_MAX_SPEED) { const k = BALL_MAX_SPEED / s; this.ballVel.x *= k; this.ballVel.y *= k; }
+
+            this.collideShields(now);
+            if (!this.collideField(now)) {
+              this.applyBoost(now);
+              for (const b of this.barriers) this.collideBarrier(b);
+            }
+          }
+
+          if (this.connectionOpen && now - this.net.lastStateTx > 0.05) {
+            this.send({ t: 'state', s: this.serializeState(now) });
+            this.net.lastStateTx = now;
+          }
+        }
+
+        this.draw(now);
+      }
+
+      draw(now) {
+        const g = this.g, zg = this.zoneG, u = this.ui;
+        g.clear(); zg.clear(); u.clear();
+
+        g.fillGradientStyle(COLORS.bgTop, COLORS.bgTop, COLORS.bgBottom, COLORS.bgBottom, 1);
+        g.fillRect(0, 0, WIDTH, HEIGHT);
+
+        g.fillStyle(COLORS.pitch, 1);
+        g.fillRoundedRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN, FIELD_CORNER_RADIUS);
+        g.lineStyle(2, COLORS.pitchInner, 1);
+        g.strokeRoundedRect(FIELD_MARGIN + 9, FIELD_MARGIN + 9, WIDTH - 2 * FIELD_MARGIN - 18, HEIGHT - 2 * FIELD_MARGIN - 18, FIELD_CORNER_RADIUS - 10);
+        g.lineStyle(3, COLORS.line, 1);
+        g.strokeRoundedRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN, FIELD_CORNER_RADIUS);
+        g.lineStyle(2, 0x96e1d7, 1);
+        g.beginPath(); g.moveTo(WIDTH * 0.5, FIELD_MARGIN + 12); g.lineTo(WIDTH * 0.5, HEIGHT - FIELD_MARGIN - 12); g.strokePath();
+        g.strokeCircle(WIDTH * 0.5, HEIGHT * 0.5, 70);
+
+        g.lineStyle(3, COLORS.goal, 1);
+        g.strokeRect(FIELD_MARGIN - GOAL_DEPTH, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
+        g.strokeRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
+        g.lineStyle(4, COLORS.goal, 1);
+        g.beginPath(); g.moveTo(GOAL_LINE_X_LEFT, GOAL_TOP); g.lineTo(GOAL_LINE_X_LEFT, GOAL_BOTTOM); g.moveTo(GOAL_LINE_X_RIGHT, GOAL_TOP); g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM); g.strokePath();
+
+        zg.fillStyle(COLORS.zoneFill, 0.42);
+        zg.fillRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
+        zg.fillRoundedRect(this.rightZone.x, this.rightZone.y, this.rightZone.w, this.rightZone.h, BOOST_BLOCK_RADIUS);
+        zg.lineStyle(3, COLORS.zoneEdge, 0.95);
+        zg.strokeRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
+        zg.strokeRoundedRect(this.rightZone.x, this.rightZone.y, this.rightZone.w, this.rightZone.h, BOOST_BLOCK_RADIUS);
+
+        if (this.shieldActive(now)) {
+          g.fillStyle(COLORS.shieldFill, 0.36);
+          g.fillCircle(GOAL_LINE_X_LEFT + SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+          g.fillCircle(GOAL_LINE_X_RIGHT - SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+          g.lineStyle(4, COLORS.shieldEdge, 0.9);
+          g.strokeCircle(GOAL_LINE_X_LEFT + SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+          g.strokeCircle(GOAL_LINE_X_RIGHT - SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+        }
+
+        for (const b of this.barriers) {
+          const a = clamp(1 - (now - b.created) / BARRIER_LIFETIME, 0, 1);
+          g.lineStyle(BARRIER_THICKNESS, COLORS.barrier, a);
+          g.beginPath(); g.moveTo(b.a.x, b.a.y); g.lineTo(b.b.x, b.b.y); g.strokePath();
+        }
+
+        for (const side of ['left', 'right']) {
+          const c = this.ctrl[side];
+          if (c.rDraw && c.rLast) {
+            g.lineStyle(2, COLORS.barrier, 0.8);
+            g.beginPath(); g.moveTo(c.rLast.x, c.rLast.y); g.lineTo(c.pointer.x, c.pointer.y); g.strokePath();
+          }
+          if (c.lStart && c.lCur) {
+            const end = clampDrag(c.lStart, c.lCur, BOOST_PAD_MAX_LENGTH);
+            g.lineStyle(2, COLORS.boostHint, 0.95);
+            g.beginPath(); g.moveTo(c.lStart.x, c.lStart.y); g.lineTo(end.x, end.y); g.strokePath();
+          }
+        }
+
+        if (this.boostPad && this.boostPad.valid) {
+          g.lineStyle(BOOST_PAD_THICKNESS, COLORS.boost, 1);
+          g.beginPath(); g.moveTo(this.boostPad.a.x, this.boostPad.a.y); g.lineTo(this.boostPad.b.x, this.boostPad.b.y); g.strokePath();
+        }
+
+        g.fillStyle(0x050a0c, 0.9); g.fillCircle(this.ballPos.x + 2.4, this.ballPos.y + 2.8, BALL_RADIUS + 1);
+        g.fillStyle(COLORS.ball, 1); g.fillCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
+        g.lineStyle(2, COLORS.ballStroke, 1); g.strokeCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
+
+        const top = { x: WIDTH / 2 - 200, y: 10, w: 400, h: 78 };
+        const ink = { x: WIDTH - 290, y: 12, w: 270, h: 82 };
+        for (const p of [top, ink]) {
+          u.fillStyle(COLORS.panel, 0.78); u.fillRoundedRect(p.x, p.y, p.w, p.h, 12);
+          u.lineStyle(2, COLORS.panelEdge, 0.52); u.strokeRoundedRect(p.x, p.y, p.w, p.h, 12);
+        }
+
+        const barX = ink.x + 16, barY = ink.y + 38, barW = ink.w - 32, barH = 22;
+        u.fillStyle(0x233442, 1); u.fillRoundedRect(barX, barY, barW, barH, 8);
+        const rem = clamp((MAX_INK_LENGTH - this.inkUsed) / MAX_INK_LENGTH, 0, 1);
+        u.fillStyle(COLORS.barrier, 1); u.fillRoundedRect(barX + 2, barY + 2, Math.floor((barW - 4) * rem), barH - 4, 6);
+        u.lineStyle(2, 0xa0d2e6, 1); u.strokeRoundedRect(barX, barY, barW, barH, 8);
+
+        this.scoreText.setText(`${this.leftScore} : ${this.rightScore}`);
+        this.inkPct.setText(`${Math.floor(rem * 100)}%`);
+
+        if (this.kickoffPhase === 'countdown') {
+          this.kickText.setText(String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now))));
+          this.kickText.setVisible(true);
+        } else if (this.kickoffPhase === 'waiting_touch') {
+          this.kickText.setText('GO'); this.kickText.setVisible(true);
+        } else this.kickText.setVisible(false);
+
+        if (this.shieldActive(now)) {
+          this.shieldText.setText(`GOAL SHIELDS ${(this.shieldEnd - now).toFixed(1)}s`);
+          this.shieldText.setVisible(true);
+        } else this.shieldText.setVisible(false);
+      }
+    }
+
+    new Phaser.Game({ type: Phaser.WEBGL, width: WIDTH, height: HEIGHT, parent: 'game', scene: [Scene] });
+  </script>
+</body>
+</html>
