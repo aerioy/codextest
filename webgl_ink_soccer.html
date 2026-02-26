@@ -188,6 +188,13 @@
       create() {
         this.graphics = this.add.graphics();
         this.uiGraphics = this.add.graphics();
+        this.zoneGraphics = this.add.graphics();
+
+        this.zoneMaskSource = this.make.graphics({ x: 0, y: 0, add: false });
+        this.zoneMaskSource.fillStyle(0xffffff, 1);
+        this.zoneMaskSource.fillRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN);
+        this.zoneMask = this.zoneMaskSource.createGeometryMask();
+        this.zoneGraphics.setMask(this.zoneMask);
 
         this.scoreText = this.add.text(WIDTH / 2, 28, '0 : 0', {
           fontFamily: 'Avenir Next, Segoe UI, sans-serif',
@@ -745,6 +752,7 @@
       redraw(now) {
         this.graphics.clear();
         this.uiGraphics.clear();
+        this.zoneGraphics.clear();
 
         const g = this.graphics;
 
@@ -777,27 +785,14 @@
         g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM);
         g.strokePath();
 
-        // Boost penalty zones: draw only the in-pitch half directly (no clip API).
-        const halfW = this.leftBlockZone.w * 0.5;
-        const leftVisible = {
-          x: GOAL_LINE_X_LEFT,
-          y: this.leftBlockZone.y,
-          w: halfW,
-          h: this.leftBlockZone.h
-        };
-        const rightVisible = {
-          x: GOAL_LINE_X_RIGHT - halfW,
-          y: this.rightBlockZone.y,
-          w: halfW,
-          h: this.rightBlockZone.h
-        };
-
-        g.fillStyle(COLORS.zoneFill, 0.42);
-        g.fillRoundedRect(leftVisible.x, leftVisible.y, leftVisible.w, leftVisible.h, leftVisible.w * 0.5);
-        g.fillRoundedRect(rightVisible.x, rightVisible.y, rightVisible.w, rightVisible.h, rightVisible.w * 0.5);
-        g.lineStyle(3, COLORS.zoneEdge, 0.95);
-        g.strokeRoundedRect(leftVisible.x, leftVisible.y, leftVisible.w, leftVisible.h, leftVisible.w * 0.5);
-        g.strokeRoundedRect(rightVisible.x, rightVisible.y, rightVisible.w, rightVisible.h, rightVisible.w * 0.5);
+        // Boost penalty zones: full rounded shapes centered on goal line, masked to pitch.
+        const zg = this.zoneGraphics;
+        zg.fillStyle(COLORS.zoneFill, 0.42);
+        zg.fillRoundedRect(this.leftBlockZone.x, this.leftBlockZone.y, this.leftBlockZone.w, this.leftBlockZone.h, BOOST_BLOCK_RADIUS);
+        zg.fillRoundedRect(this.rightBlockZone.x, this.rightBlockZone.y, this.rightBlockZone.w, this.rightBlockZone.h, BOOST_BLOCK_RADIUS);
+        zg.lineStyle(3, COLORS.zoneEdge, 0.95);
+        zg.strokeRoundedRect(this.leftBlockZone.x, this.leftBlockZone.y, this.leftBlockZone.w, this.leftBlockZone.h, BOOST_BLOCK_RADIUS);
+        zg.strokeRoundedRect(this.rightBlockZone.x, this.rightBlockZone.y, this.rightBlockZone.w, this.rightBlockZone.h, BOOST_BLOCK_RADIUS);
 
         if (this.shieldActive(now)) {
           g.fillStyle(COLORS.shieldFill, 0.36);
