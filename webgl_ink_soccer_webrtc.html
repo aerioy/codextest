@@ -20,10 +20,21 @@
       width: 100%;
       height: 100%;
       display: block;
+      z-index: 2;
+    }
+    #pitchOverlay {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+      z-index: 1;
     }
     #hud {
       position: fixed;
       inset: 0;
+      z-index: 4;
       pointer-events: none;
       display: flex;
       flex-direction: column;
@@ -114,16 +125,19 @@
       line-height: 1.2;
     }
     canvas {
+      position: fixed;
       display: block;
       border-radius: 14px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
       image-rendering: auto;
+      z-index: 2;
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
 </head>
 <body>
   <div id="game"></div>
+  <svg id="pitchOverlay" viewBox="0 0 1100 650" preserveAspectRatio="none" aria-hidden="true"></svg>
   <div id="hud">
     <div id="hudTop">
       <div id="hudScoreWrap">
@@ -866,50 +880,6 @@
 
         g.fillStyle(COLORS.pitch, 1);
         g.fillRoundedRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, FIELD_CORNER_RADIUS);
-        g.lineStyle(1, 0xd9fff6, 0.07);
-        for (let yy = FIELD_TOP + 10; yy < FIELD_BOTTOM; yy += 24) {
-          g.beginPath(); g.moveTo(FIELD_LEFT + 16, yy); g.lineTo(FIELD_RIGHT - 16, yy); g.strokePath();
-        }
-        g.lineStyle(2, COLORS.pitchInner, 1);
-        g.strokeRoundedRect(FIELD_LEFT + 9, FIELD_TOP + 9, (FIELD_RIGHT - FIELD_LEFT) - 18, (FIELD_BOTTOM - FIELD_TOP) - 18, FIELD_CORNER_RADIUS - 10);
-        g.lineStyle(3, COLORS.line, 1);
-        g.strokeRoundedRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP, FIELD_CORNER_RADIUS);
-        g.lineStyle(2, 0x96e1d7, 1);
-        g.beginPath(); g.moveTo(WIDTH * 0.5, FIELD_TOP + 12); g.lineTo(WIDTH * 0.5, FIELD_BOTTOM - 12); g.strokePath();
-        g.strokeCircle(WIDTH * 0.5, HEIGHT * 0.5, 70);
-
-        const leftBackX = FIELD_LEFT - GOAL_DEPTH;
-        const rightBackX = GOAL_LINE_X_RIGHT + GOAL_DEPTH;
-
-        g.fillStyle(COLORS.goalNet, 0.12);
-        g.fillRoundedRect(leftBackX, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
-        g.fillRoundedRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
-
-        g.lineStyle(8, COLORS.goalGlow, 0.20);
-        g.beginPath();
-        g.moveTo(GOAL_LINE_X_LEFT, GOAL_TOP); g.lineTo(GOAL_LINE_X_LEFT, GOAL_BOTTOM);
-        g.moveTo(GOAL_LINE_X_RIGHT, GOAL_TOP); g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM);
-        g.strokePath();
-
-        g.lineStyle(3, COLORS.goalFrame, 0.95);
-        g.strokeRoundedRect(leftBackX, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
-        g.strokeRoundedRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING, 8);
-        g.lineStyle(5, COLORS.goalFrame, 1);
-        g.beginPath(); g.moveTo(GOAL_LINE_X_LEFT, GOAL_TOP); g.lineTo(GOAL_LINE_X_LEFT, GOAL_BOTTOM); g.moveTo(GOAL_LINE_X_RIGHT, GOAL_TOP); g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM); g.strokePath();
-
-        g.lineStyle(1, COLORS.goalNet, 0.35);
-        for (let yy = GOAL_TOP + 8; yy < GOAL_BOTTOM; yy += 14) {
-          g.beginPath();
-          g.moveTo(leftBackX + 3, yy); g.lineTo(GOAL_LINE_X_LEFT - 2, yy);
-          g.moveTo(GOAL_LINE_X_RIGHT + 2, yy); g.lineTo(rightBackX - 3, yy);
-          g.strokePath();
-        }
-        for (let xx = leftBackX + 5; xx < GOAL_LINE_X_LEFT - 3; xx += 8) {
-          g.beginPath(); g.moveTo(xx, GOAL_TOP + 3); g.lineTo(xx, GOAL_BOTTOM - 3); g.strokePath();
-        }
-        for (let xx = GOAL_LINE_X_RIGHT + 4; xx < rightBackX - 4; xx += 8) {
-          g.beginPath(); g.moveTo(xx, GOAL_TOP + 3); g.lineTo(xx, GOAL_BOTTOM - 3); g.strokePath();
-        }
 
         zg.fillStyle(COLORS.zoneLeftFill, 0.38);
         zg.fillRoundedRect(this.leftZone.x, this.leftZone.y, this.leftZone.w, this.leftZone.h, BOOST_BLOCK_RADIUS);
@@ -1009,6 +979,29 @@
       }
     }
 
+    const pitchOverlay = document.getElementById('pitchOverlay');
+    pitchOverlay.innerHTML = `
+      <defs>
+        <clipPath id="pitchClip">
+          <rect x="${FIELD_LEFT}" y="${FIELD_TOP}" width="${FIELD_RIGHT - FIELD_LEFT}" height="${FIELD_BOTTOM - FIELD_TOP}" rx="${FIELD_CORNER_RADIUS}" ry="${FIELD_CORNER_RADIUS}" />
+        </clipPath>
+      </defs>
+      <g clip-path="url(#pitchClip)">
+        ${Array.from({ length: Math.floor((FIELD_BOTTOM - FIELD_TOP - 20) / 24) + 1 }, (_, i) => {
+          const yy = FIELD_TOP + 10 + i * 24;
+          return `<line x1="${FIELD_LEFT + 16}" y1="${yy}" x2="${FIELD_RIGHT - 16}" y2="${yy}" stroke="#d9fff6" stroke-opacity="0.10" stroke-width="1" />`;
+        }).join('')}
+      </g>
+      <rect x="${FIELD_LEFT + 9}" y="${FIELD_TOP + 9}" width="${(FIELD_RIGHT - FIELD_LEFT) - 18}" height="${(FIELD_BOTTOM - FIELD_TOP) - 18}" rx="${FIELD_CORNER_RADIUS - 10}" ry="${FIELD_CORNER_RADIUS - 10}" fill="none" stroke="#0e423a" stroke-width="2" />
+      <rect x="${FIELD_LEFT}" y="${FIELD_TOP}" width="${FIELD_RIGHT - FIELD_LEFT}" height="${FIELD_BOTTOM - FIELD_TOP}" rx="${FIELD_CORNER_RADIUS}" ry="${FIELD_CORNER_RADIUS}" fill="none" stroke="#c8f5f0" stroke-width="3" />
+      <line x1="${WIDTH * 0.5}" y1="${FIELD_TOP + 12}" x2="${WIDTH * 0.5}" y2="${FIELD_BOTTOM - 12}" stroke="#96e1d7" stroke-width="2" />
+      <circle cx="${WIDTH * 0.5}" cy="${HEIGHT * 0.5}" r="70" fill="none" stroke="#96e1d7" stroke-width="2" />
+      <rect x="${FIELD_LEFT - GOAL_DEPTH}" y="${GOAL_TOP}" width="${GOAL_DEPTH}" height="${GOAL_OPENING}" rx="8" ry="8" fill="#9aa3ad" fill-opacity="0.12" stroke="#bfc7cf" stroke-opacity="0.95" stroke-width="3" />
+      <rect x="${GOAL_LINE_X_RIGHT}" y="${GOAL_TOP}" width="${GOAL_DEPTH}" height="${GOAL_OPENING}" rx="8" ry="8" fill="#9aa3ad" fill-opacity="0.12" stroke="#bfc7cf" stroke-opacity="0.95" stroke-width="3" />
+      <line x1="${GOAL_LINE_X_LEFT}" y1="${GOAL_TOP}" x2="${GOAL_LINE_X_LEFT}" y2="${GOAL_BOTTOM}" stroke="#bfc7cf" stroke-width="5" />
+      <line x1="${GOAL_LINE_X_RIGHT}" y1="${GOAL_TOP}" x2="${GOAL_LINE_X_RIGHT}" y2="${GOAL_BOTTOM}" stroke="#bfc7cf" stroke-width="5" />
+    `;
+
     const game = new Phaser.Game({
       type: Phaser.WEBGL,
       width: WIDTH,
@@ -1022,31 +1015,26 @@
       roundPixels: false,
       resolution: RENDER_RESOLUTION,
       scale: {
-        mode: Phaser.Scale.NONE,
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
         width: WIDTH,
         height: HEIGHT
       }
     });
 
-    function layoutCanvas() {
-      const canvas = game.canvas;
-      if (!canvas) return;
-      const s = Math.min(window.innerWidth / WIDTH, window.innerHeight / HEIGHT);
-      const w = Math.max(1, Math.floor(WIDTH * s));
-      const h = Math.max(1, Math.floor(HEIGHT * s));
-      const x = Math.floor((window.innerWidth - w) * 0.5);
-      const y = Math.floor((window.innerHeight - h) * 0.5);
-      canvas.style.position = 'fixed';
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
-      canvas.style.left = `${x}px`;
-      canvas.style.top = `${y}px`;
+    function syncOverlayToCanvas() {
+      if (!game.canvas) return;
+      const r = game.canvas.getBoundingClientRect();
+      pitchOverlay.style.left = `${Math.round(r.left)}px`;
+      pitchOverlay.style.top = `${Math.round(r.top)}px`;
+      pitchOverlay.style.width = `${Math.round(r.width)}px`;
+      pitchOverlay.style.height = `${Math.round(r.height)}px`;
     }
 
-    window.addEventListener('resize', layoutCanvas);
+    window.addEventListener('resize', () => requestAnimationFrame(syncOverlayToCanvas));
     const waitForCanvas = () => {
       if (!game.canvas) { requestAnimationFrame(waitForCanvas); return; }
-      layoutCanvas();
+      syncOverlayToCanvas();
     };
     waitForCanvas();
   </script>
