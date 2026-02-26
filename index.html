@@ -447,6 +447,11 @@
         return pointInRoundedRect(p, this.leftZone, BOOST_BLOCK_RADIUS) || pointInRoundedRect(p, this.rightZone, BOOST_BLOCK_RADIUS);
       }
 
+      pointInOpponentBoostZone(side, p) {
+        if (side === 'left') return pointInRoundedRect(p, this.rightZone, BOOST_BLOCK_RADIUS);
+        return pointInRoundedRect(p, this.leftZone, BOOST_BLOCK_RADIUS);
+      }
+
       boostAllowed(side, pad) {
         if (!pad || !pad.valid) return false;
         if (this.kickoffPhase === 'waiting_touch' && side !== this.kickoffSide) return false;
@@ -454,6 +459,7 @@
           const t = i / 11;
           const p = { x: Phaser.Math.Linear(pad.a.x, pad.b.x, t), y: Phaser.Math.Linear(pad.a.y, pad.b.y, t) };
           if (!this.canSideInteract(side, p)) return false;
+          if (this.pointInOpponentBoostZone(side, p)) return false;
         }
         return true;
       }
