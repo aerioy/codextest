@@ -246,6 +246,22 @@
         if (presetRoom) roomInput.value = presetRoom;
 
         const makeRoomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+        const PEER_OPTIONS = {
+          config: {
+            iceServers: [
+              { urls: ["stun:stun.l.google.com:19302", "stun:global.stun.twilio.com:3478"] },
+              {
+                urls: [
+                  "turn:openrelay.metered.ca:80",
+                  "turn:openrelay.metered.ca:443",
+                  "turn:openrelay.metered.ca:443?transport=tcp"
+                ],
+                username: "openrelayproject",
+                credential: "openrelayproject"
+              }
+            ]
+          }
+        };
 
         const teardown = () => {
           if (this.net.conn) { try { this.net.conn.close(); } catch {} }
@@ -277,7 +293,7 @@
           this.playerSide = "left";
           this.isAuthoritative = true;
 
-          this.net.peer = new Peer(room);
+          this.net.peer = new Peer(room, PEER_OPTIONS);
           this.net.peer.on("open", (id) => {
             const url = window.location.origin + window.location.pathname + "?room=" + id;
             roomInfo.textContent = "Room: " + id + " | Share URL with Player 2";
@@ -292,7 +308,7 @@
               return;
             }
             bindConn(conn);
-            this.status("Player 2 connected");
+            this.status("Player 2 is connecting...");
           });
           this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
         };
@@ -310,12 +326,17 @@
           this.isAuthoritative = false;
           roleEl.textContent = "(Join / Player 2 Right)";
 
-          this.net.peer = new Peer();
+          this.net.peer = new Peer(PEER_OPTIONS);
           this.net.peer.on("open", () => {
             const conn = this.net.peer.connect(room, { reliable: true, serialization: "json" });
             bindConn(conn);
             this.status("Connecting to host...");
             roomInfo.textContent = "Joining room: " + room;
+            setTimeout(() => {
+              if (!this.connectionOpen && this.net.conn === conn) {
+                this.status("Connect timeout. If peers are on different networks, TURN relay is required.");
+              }
+            }, 10000);
           });
           this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
         };
