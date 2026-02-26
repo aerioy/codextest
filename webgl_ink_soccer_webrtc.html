@@ -175,6 +175,7 @@
 
         this.net = { ws: null, host: false, roomCode: "", lastStateTx: 0, connectTimer: null, inviteUrl: "" };
         this.setupNetUI();
+        window.__inkScene = this;
 
         this.startKickoff(this.now(), 'left');
 
@@ -288,11 +289,14 @@
         };
 
         teardown();
+        const HOST_ROOM_KEY = "ink_soccer_host_room";
         const room = presetRoom || makeRoomCode();
+        const url = window.location.origin + window.location.pathname + "?room=" + room;
+        this.net.inviteUrl = url;
+
         if (!presetRoom) {
-          const url = window.location.origin + window.location.pathname + "?room=" + room;
+          localStorage.setItem(HOST_ROOM_KEY, room);
           history.replaceState(null, "", url);
-          this.net.inviteUrl = url;
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(() => this.status("Invite URL copied"))
               .catch(() => this.status("Invite URL ready"));
@@ -302,10 +306,12 @@
           this.isAuthoritative = true;
           connectRoom(room, "host");
         } else {
-          this.net.host = false;
-          this.playerSide = "right";
-          this.isAuthoritative = false;
-          connectRoom(room, "join");
+          const rememberedHostRoom = (localStorage.getItem(HOST_ROOM_KEY) || "").toUpperCase();
+          const shouldHost = rememberedHostRoom === room;
+          this.net.host = shouldHost;
+          this.playerSide = shouldHost ? "left" : "right";
+          this.isAuthoritative = shouldHost;
+          connectRoom(room, shouldHost ? "host" : "join");
         }
       }
 
