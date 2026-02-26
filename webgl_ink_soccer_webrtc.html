@@ -305,21 +305,51 @@
         if (presetRoom) roomInput.value = presetRoom;
 
         const makeRoomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
-        const PEER_OPTIONS = {
-          config: {
-            iceServers: [
-              { urls: ["stun:stun.l.google.com:19302", "stun:global.stun.twilio.com:3478"] },
-              {
-                urls: [
-                  "turn:openrelay.metered.ca:80",
-                  "turn:openrelay.metered.ca:443",
-                  "turn:openrelay.metered.ca:443?transport=tcp"
-                ],
-                username: "openrelayproject",
-                credential: "openrelayproject"
-              }
-            ]
+
+        const makeOpenRelayCredentials = async () => {
+          const username = `${Math.floor(Date.now() / 1000) + 24 * 3600}:codextest`;
+          const enc = new TextEncoder();
+          const key = await crypto.subtle.importKey(
+            "raw",
+            enc.encode("openrelayprojectsecret"),
+            { name: "HMAC", hash: "SHA-1" },
+            false,
+            ["sign"]
+          );
+          const sig = await crypto.subtle.sign("HMAC", key, enc.encode(username));
+          const bytes = new Uint8Array(sig);
+          let raw = "";
+          for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
+          return { username, credential: btoa(raw) };
+        };
+
+        const buildPeerOptions = async () => {
+          const iceServers = [
+            { urls: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }
+          ];
+
+          try {
+            const creds = await makeOpenRelayCredentials();
+            iceServers.unshift({
+              urls: [
+                "turn:staticauth.openrelay.metered.ca:80?transport=udp",
+                "turn:staticauth.openrelay.metered.ca:80?transport=tcp",
+                "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
+                "turns:staticauth.openrelay.metered.ca:443?transport=tcp"
+              ],
+              username: creds.username,
+              credential: creds.credential
+            });
+          } catch {
+            // Fallback to legacy public credentials if WebCrypto is unavailable.
+            iceServers.unshift({
+              urls: ["turn:openrelay.metered.ca:80?transport=tcp"],
+              username: "openrelayproject",
+              credential: "openrelayproject"
+            });
           }
+
+          return { config: { iceServers } };
         };
 
         const teardown = () => {
@@ -347,7 +377,7 @@
           conn.on("data", (data) => this.onNetMessage(typeof data === "string" ? data : JSON.stringify(data)));
         };
 
-        const startHost = () => {
+        const startHost = async () => {
           teardown();
           const room = makeRoomCode();
           this.net.host = true;
@@ -355,7 +385,9 @@
           this.playerSide = "left";
           this.isAuthoritative = true;
 
-          this.net.peer = new Peer(room, PEER_OPTIONS);
+          this.status("Preparing connection...");
+          const peerOptions = await buildPeerOptions();
+          this.net.peer = new Peer(room, peerOptions);
           this.net.peer.on("open", (id) => {
             const url = window.location.origin + window.location.pathname + "?room=" + id;
             roomInfo.textContent = "Room: " + id + " | Share URL with Player 2";
@@ -375,7 +407,7 @@
           this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
         };
 
-        const startJoin = () => {
+        const startJoin = async () => {
           const room = (roomInput.value || "").trim().toUpperCase();
           if (!room) {
             this.status("Enter a room code first");
@@ -388,7 +420,9 @@
           this.isAuthoritative = false;
           roleEl.textContent = "(Join / Player 2 Right)";
 
-          this.net.peer = new Peer(PEER_OPTIONS);
+          this.status("Preparing connection...");
+          const peerOptions = await buildPeerOptions();
+          this.net.peer = new Peer(peerOptions);
           this.net.peer.on("open", () => {
             const conn = this.net.peer.connect(room, { reliable: true, serialization: "json" });
             bindConn(conn);
@@ -403,8 +437,8 @@
           this.net.peer.on("error", (err) => this.status("Peer error: " + (err && err.message ? err.message : err)));
         };
 
-        document.getElementById("hostBtn").onclick = startHost;
-        document.getElementById("joinBtn").onclick = startJoin;
+        document.getElementById("hostBtn").onclick = () => { startHost().catch((e) => this.status("Host setup error: " + e.message)); };
+        document.getElementById("joinBtn").onclick = () => { startJoin().catch((e) => this.status("Join setup error: " + e.message)); };
 
         document.getElementById("copyRoomBtn").onclick = async () => {
           if (!this.net.inviteUrl) {
