@@ -329,6 +329,9 @@
           inkPct: document.getElementById('hudInkPct'),
           kick: document.getElementById('kickOverlay')
         };
+        this.ballShadowSvg = document.getElementById('ballShadowSvg');
+        this.ballMainSvg = document.getElementById('ballMainSvg');
+        this.ballStrokeSvg = document.getElementById('ballStrokeSvg');
 
         this.initAudio();
 
@@ -1024,10 +1027,6 @@
       <circle id="ballStrokeSvg" cx="${WIDTH * 0.5}" cy="${HEIGHT * 0.5}" r="${BALL_RADIUS}" fill="none" stroke="#142028" stroke-width="2" />
     `;
 
-    const ballShadowSvg = document.getElementById('ballShadowSvg');
-    const ballMainSvg = document.getElementById('ballMainSvg');
-    const ballStrokeSvg = document.getElementById('ballStrokeSvg');
-
     const game = new Phaser.Game({
       type: Phaser.WEBGL,
       width: WIDTH,
@@ -1061,12 +1060,6 @@
     const waitForCanvas = () => {
       if (!game.canvas) { requestAnimationFrame(waitForCanvas); return; }
       syncOverlayToCanvas();
-      const scene = game.scene.keys.s;
-      if (scene) {
-        scene.ballShadowSvg = ballShadowSvg;
-        scene.ballMainSvg = ballMainSvg;
-        scene.ballStrokeSvg = ballStrokeSvg;
-      }
     };
     waitForCanvas();
   </script>
