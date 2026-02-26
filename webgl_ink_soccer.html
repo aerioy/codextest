@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ink Soccer WebGL</title>
+  <style>
+    :root {
+      --bg: #09101a;
+      --panel: rgba(10,24,35,0.78);
+      --panel-edge: rgba(84,186,220,0.52);
+      --text: #e4f4ff;
+      --muted: #96bed2;
+    }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 20% 20%, #16273a 0%, #0b1320 45%, #070c14 100%);
+      overflow: hidden;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--text);
+    }
+    #game {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+    }
+    canvas {
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+      max-width: min(100vw, 1100px);
+      max-height: min(100vh, 650px);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+</head>
+<body>
+  <div id="game"></div>
+  <script>
+    const WIDTH = 1100;
+    const HEIGHT = 650;
+
+    const FIELD_MARGIN = 40;
+    const FIELD_CORNER_RADIUS = 92;
+
+    const GOAL_OPENING = 246;
+    const GOAL_DEPTH = 30;
+    const GOAL_LINE_X_LEFT = FIELD_MARGIN;
+    const GOAL_LINE_X_RIGHT = WIDTH - FIELD_MARGIN;
+    const GOAL_TOP = HEIGHT * 0.5 - GOAL_OPENING * 0.5;
+    const GOAL_BOTTOM = HEIGHT * 0.5 + GOAL_OPENING * 0.5;
+    const GOAL_CENTER_Y = HEIGHT * 0.5;
+
+    const BALL_RADIUS = 14;
+    const BALL_DAMPING = 0.995;
+    const BALL_MAX_SPEED = 1100;
+
+    const BOOST_PAD_THICKNESS = 8;
+    const BOOST_PAD_MIN_DRAG = 14;
+    const BOOST_PAD_MAX_LENGTH = BALL_RADIUS * 2 * 5;
+    const BOOST_IMPULSE_MIN = 200;
+    const BOOST_IMPULSE_MAX = 760;
+    const BOOST_COOLDOWN = 0.22;
+
+    const BARRIER_THICKNESS = 6;
+    const BARRIER_SEGMENT_STEP = 8;
+    const BARRIER_LIFETIME = 2.0;
+    const MAX_INK_LENGTH = GOAL_OPENING * 0.34;
+
+    const KICKOFF_COUNTDOWN = 3.0;
+    const GOAL_SHIELD_DURATION = 3.0;
+    const SHIELD_RADIUS = 120;
+    const SHIELD_INSET_X = 28;
+
+    const BOOST_BLOCK_HEIGHT = Math.floor(GOAL_OPENING * 1.5);
+    const BOOST_BLOCK_DEPTH = Math.floor(GOAL_OPENING * 0.75);
+    const BOOST_BLOCK_RADIUS = Math.min(Math.floor(BOOST_BLOCK_DEPTH / 2), Math.floor(BOOST_BLOCK_HEIGHT / 2) - 4);
+    const BOOST_ZONE_MULTIPLIER = 0.30;
+    const STALL_SPEED_THRESHOLD = 20.0;
+    const STALL_TIME_TO_NUDGE = 0.65;
+    const STALL_NUDGE_IMPULSE = 170.0;
+
+    const COLORS = {
+      bgTop: 0x111f2f,
+      bgBottom: 0x070c14,
+      pitch: 0x12564a,
+      pitchInner: 0x0e423a,
+      line: 0xc8f5f0,
+      goal: 0x5adcff,
+      ball: 0xf5faff,
+      ballStroke: 0x142028,
+      boost: 0x42caff,
+      boostHint: 0x78a0be,
+      barrier: 0xff6e80,
+      shieldFill: 0xffa546,
+      shieldEdge: 0xffbe74,
+      zoneFill: 0xff3737,
+      zoneEdge: 0xff6b6b,
+      panel: 0x0a1823,
+      panelEdge: 0x54badc,
+      text: '#e4f4ff',
+      muted: '#96bed2'
+    };
+
+    function clamp(v, lo, hi) {
+      return Math.max(lo, Math.min(hi, v));
+    }
+
+    function vecLen(v) {
+      return Math.hypot(v.x, v.y);
+    }
+
+    function normalize(v) {
+      const d = Math.hypot(v.x, v.y);
+      if (d <= 1e-9) return { x: 0, y: 0 };
+      return { x: v.x / d, y: v.y / d };
+    }
+
+    function distancePointToSegment(point, a, b) {
+      const apx = point.x - a.x;
+      const apy = point.y - a.y;
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const abLenSq = abx * abx + aby * aby;
+      if (abLenSq <= 1e-9) {
+        return { d: Math.hypot(apx, apy), closest: { x: a.x, y: a.y }, t: 0 };
+      }
+      const t = clamp((apx * abx + apy * aby) / abLenSq, 0, 1);
+      const closest = { x: a.x + abx * t, y: a.y + aby * t };
+      return { d: Math.hypot(point.x - closest.x, point.y - closest.y), closest, t };
+    }
+
+    function clampDragLine(a, b, maxLen) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= maxLen || d <= 1e-9) return { x: b.x, y: b.y };
+      const s = maxLen / d;
+      return { x: a.x + dx * s, y: a.y + dy * s };
+    }
+
+    function pointInRoundedRect(p, rect, radius) {
+      if (p.x < rect.x || p.x > rect.x + rect.w || p.y < rect.y || p.y > rect.y + rect.h) return false;
+      const cx = clamp(p.x, rect.x + radius, rect.x + rect.w - radius);
+      const cy = clamp(p.y, rect.y + radius, rect.y + rect.h - radius);
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      return dx * dx + dy * dy <= radius * radius;
+    }
+
+    class SoundBank {
+      constructor() {
+        this.ctx = null;
+        this.enabled = false;
+      }
+
+      ensure() {
+        if (this.enabled) return;
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        this.ctx = new Ctx();
+        this.enabled = true;
+      }
+
+      beep(freq, duration, volume) {
+        if (!this.enabled || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.value = volume;
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + duration);
+      }
+    }
+
+    class InkSoccerScene extends Phaser.Scene {
+      constructor() {
+        super('ink-soccer');
+      }
+
+      create() {
+        this.graphics = this.add.graphics();
+        this.uiGraphics = this.add.graphics();
+
+        this.scoreText = this.add.text(WIDTH / 2, 28, '0 : 0', {
+          fontFamily: 'Avenir Next, Segoe UI, sans-serif',
+          fontSize: '52px',
+          color: COLORS.text,
+          fontStyle: '700'
+        }).setOrigin(0.5, 0);
+
+        this.kickoffText = this.add.text(WIDTH / 2, HEIGHT / 2 - 140, '', {
+          fontFamily: 'Avenir Next, Segoe UI, sans-serif',
+          fontSize: '34px',
+          color: '#a0f0ff',
+          fontStyle: '700'
+        }).setOrigin(0.5);
+
+        this.shieldText = this.add.text(WIDTH / 2, 98, '', {
+          fontFamily: 'Avenir Next, Segoe UI, sans-serif',
+          fontSize: '18px',
+          color: '#ffbe74'
+        }).setOrigin(0.5);
+
+        this.hintText = this.add.text(WIDTH / 2, HEIGHT - 20, 'L-drag: boost  R-drag: wall  R: reset', {
+          fontFamily: 'Avenir Next, Segoe UI, sans-serif',
+          fontSize: '18px',
+          color: COLORS.muted
+        }).setOrigin(0.5, 0.5);
+
+        this.playerButton = {
+          x: 18,
+          y: HEIGHT - 54,
+          w: 236,
+          h: 36
+        };
+        this.playerText = this.add.text(this.playerButton.x + this.playerButton.w / 2, this.playerButton.y + this.playerButton.h / 2, '', {
+          fontFamily: 'Avenir Next, Segoe UI, sans-serif',
+          fontSize: '17px',
+          color: COLORS.text
+        }).setOrigin(0.5);
+
+        this.inkLabel = this.add.text(WIDTH - 274, 22, 'INK', {
+          fontFamily: 'Avenir Next, Segoe UI, sans-serif',
+          fontSize: '18px',
+          color: COLORS.muted
+        });
+        this.inkPct = this.add.text(WIDTH - 34, 66, '100%', {
+          fontFamily: 'Avenir Next, Segoe UI, sans-serif',
+          fontSize: '17px',
+          color: COLORS.text
+        }).setOrigin(1, 0);
+
+        this.soundBank = new SoundBank();
+        this.lastShieldSfx = -10;
+        this.lastCountdownValue = null;
+
+        this.leftScore = 0;
+        this.rightScore = 0;
+
+        this.ballPos = { x: WIDTH * 0.5, y: HEIGHT * 0.5 };
+        this.ballVel = { x: 0, y: 0 };
+
+        this.boostPad = null;
+        this.lastBoostTime = -10;
+        this.barriers = [];
+        this.inkUsed = 0;
+
+        this.leftDragStart = null;
+        this.leftDragCurrent = null;
+        this.rightDrawing = false;
+        this.rightLastPoint = null;
+
+        this.kickoffSide = Math.random() < 0.5 ? 'left' : 'right';
+        this.kickoffPhase = 'countdown';
+        this.kickoffCountdownEnd = 0;
+        this.shieldEndTime = 0;
+
+        this.userSide = 'left';
+        this.zoneStallTimer = 0;
+
+        this.leftBlockZone = {
+          x: GOAL_LINE_X_LEFT - BOOST_BLOCK_DEPTH * 0.5,
+          y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5,
+          w: BOOST_BLOCK_DEPTH,
+          h: BOOST_BLOCK_HEIGHT
+        };
+        this.rightBlockZone = {
+          x: GOAL_LINE_X_RIGHT - BOOST_BLOCK_DEPTH * 0.5,
+          y: GOAL_CENTER_Y - BOOST_BLOCK_HEIGHT * 0.5,
+          w: BOOST_BLOCK_DEPTH,
+          h: BOOST_BLOCK_HEIGHT
+        };
+
+        this.startKickoff(0, this.kickoffSide);
+
+        this.input.mouse.disableContextMenu();
+
+        this.input.on('pointerdown', (pointer) => {
+          this.soundBank.ensure();
+
+          if (pointer.leftButtonDown()) {
+            if (this.pointInRect(pointer, this.playerButton)) {
+              this.userSide = this.userSide === 'left' ? 'right' : 'left';
+              return;
+            }
+            const p = { x: pointer.x, y: pointer.y };
+            if (!this.userCanInteractAt(p)) return;
+            this.leftDragStart = { ...p };
+            this.leftDragCurrent = { ...p };
+          }
+
+          if (pointer.rightButtonDown()) {
+            const p = { x: pointer.x, y: pointer.y };
+            if (!this.userCanInteractAt(p)) return;
+            this.rightDrawing = true;
+            this.rightLastPoint = { ...p };
+          }
+        });
+
+        this.input.on('pointermove', (pointer) => {
+          const p = { x: pointer.x, y: pointer.y };
+          if (this.leftDragStart) {
+            this.leftDragCurrent = p;
+          }
+
+          if (this.rightDrawing && this.rightLastPoint) {
+            if (!this.userCanInteractAt(this.rightLastPoint) || !this.userCanInteractAt(p)) return;
+            this.addBarrierStroke(this.rightLastPoint, p, this.nowSec());
+          }
+        });
+
+        this.input.on('pointerup', (pointer) => {
+          if (!pointer.leftButtonDown() && this.leftDragStart && this.leftDragCurrent) {
+            const candidate = this.makeBoostPad(this.leftDragStart, this.leftDragCurrent);
+            this.boostPad = this.boostAllowed(candidate) ? candidate : null;
+            this.leftDragStart = null;
+            this.leftDragCurrent = null;
+          }
+
+          if (!pointer.rightButtonDown()) {
+            this.rightDrawing = false;
+            this.rightLastPoint = null;
+          }
+        });
+
+        this.input.keyboard.on('keydown-R', () => {
+          this.leftScore = 0;
+          this.rightScore = 0;
+          this.clearDrawables();
+          this.startKickoff(this.nowSec(), Math.random() < 0.5 ? 'left' : 'right');
+        });
+      }
+
+      nowSec() {
+        return this.time.now / 1000;
+      }
+
+      pointInRect(p, r) {
+        return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+      }
+
+      clearDrawables() {
+        this.boostPad = null;
+        this.barriers = [];
+        this.inkUsed = 0;
+        this.leftDragStart = null;
+        this.leftDragCurrent = null;
+        this.rightDrawing = false;
+        this.rightLastPoint = null;
+      }
+
+      halfCenterX(side) {
+        return side === 'left' ? WIDTH * 0.25 : WIDTH * 0.75;
+      }
+
+      pointInSide(p, side) {
+        return side === 'left' ? p.x <= WIDTH * 0.5 : p.x >= WIDTH * 0.5;
+      }
+
+      kickoffControlsLocked() {
+        return this.kickoffPhase === 'countdown';
+      }
+
+      kickoffSideRestricted() {
+        return this.kickoffPhase === 'waiting_touch';
+      }
+
+      userCanInteractAt(p) {
+        if (this.kickoffControlsLocked()) return false;
+        if (this.kickoffSideRestricted()) {
+          if (this.userSide !== this.kickoffSide) return false;
+          return this.pointInSide(p, this.kickoffSide);
+        }
+        return true;
+      }
+
+      startKickoff(now, concedingSide) {
+        this.kickoffSide = concedingSide;
+        this.kickoffPhase = 'countdown';
+        this.kickoffCountdownEnd = now + KICKOFF_COUNTDOWN;
+        this.shieldEndTime = 0;
+        this.lastCountdownValue = null;
+        this.ballPos = { x: this.halfCenterX(concedingSide), y: HEIGHT * 0.5 };
+        this.ballVel = { x: 0, y: 0 };
+      }
+
+      removeExpiredBarriers(now) {
+        const alive = [];
+        let used = 0;
+        for (const s of this.barriers) {
+          const age = now - s.created;
+          if (age < BARRIER_LIFETIME) {
+            alive.push(s);
+            used += s.length;
+          }
+        }
+        this.barriers = alive;
+        this.inkUsed = used;
+      }
+
+      addBarrierStroke(p0, p1, now) {
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 1e-5) return;
+
+        const steps = Math.max(1, Math.floor(dist / BARRIER_SEGMENT_STEP));
+        let prev = { x: p0.x, y: p0.y };
+
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          const cur = { x: p0.x + dx * t, y: p0.y + dy * t };
+          const len = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+          if (this.inkUsed + len > MAX_INK_LENGTH) break;
+          this.barriers.push({ a: { ...prev }, b: { ...cur }, created: now, length: len });
+          this.inkUsed += len;
+          prev = cur;
+        }
+        this.rightLastPoint = prev;
+      }
+
+      makeBoostPad(a, b) {
+        const end = clampDragLine(a, b, BOOST_PAD_MAX_LENGTH);
+        const drag = { x: end.x - a.x, y: end.y - a.y };
+        const length = Math.hypot(drag.x, drag.y);
+        const dir = normalize({ x: a.x - end.x, y: a.y - end.y });
+        return {
+          a: { ...a },
+          b: { ...end },
+          length,
+          dir,
+          valid: length >= BOOST_PAD_MIN_DRAG && (dir.x * dir.x + dir.y * dir.y) > 0
+        };
+      }
+
+      pointInBoostBlockZone(p) {
+        return pointInRoundedRect(p, this.leftBlockZone, BOOST_BLOCK_RADIUS) || pointInRoundedRect(p, this.rightBlockZone, BOOST_BLOCK_RADIUS);
+      }
+
+      boostAllowed(candidate) {
+        if (!candidate || !candidate.valid) return false;
+        if (this.kickoffSideRestricted() && this.userSide !== this.kickoffSide) return false;
+
+        for (let i = 0; i <= 11; i++) {
+          const t = i / 11;
+          const p = {
+            x: Phaser.Math.Linear(candidate.a.x, candidate.b.x, t),
+            y: Phaser.Math.Linear(candidate.a.y, candidate.b.y, t)
+          };
+          if (this.kickoffSideRestricted() && !this.pointInSide(p, this.kickoffSide)) return false;
+        }
+        return true;
+      }
+
+      applyBoostIfCrossed(now) {
+        if (!this.boostPad || !this.boostPad.valid) return;
+        if (now - this.lastBoostTime < BOOST_COOLDOWN) return;
+
+        const hit = distancePointToSegment(this.ballPos, this.boostPad.a, this.boostPad.b);
+        if (hit.d <= BALL_RADIUS + BOOST_PAD_THICKNESS) {
+          const ratio = clamp(this.boostPad.length / BOOST_PAD_MAX_LENGTH, 0, 1);
+          let impulse = BOOST_IMPULSE_MIN + ratio * (BOOST_IMPULSE_MAX - BOOST_IMPULSE_MIN);
+          if (this.pointInBoostBlockZone(this.ballPos)) impulse *= BOOST_ZONE_MULTIPLIER;
+
+          this.ballVel.x += this.boostPad.dir.x * impulse;
+          this.ballVel.y += this.boostPad.dir.y * impulse;
+
+          const sp = Math.hypot(this.ballVel.x, this.ballVel.y);
+          if (sp > BALL_MAX_SPEED) {
+            const s = BALL_MAX_SPEED / sp;
+            this.ballVel.x *= s;
+            this.ballVel.y *= s;
+          }
+
+          this.lastBoostTime = now;
+          this.soundBank.beep(560, 0.07, 0.22);
+
+          if (this.kickoffPhase === 'waiting_touch') {
+            this.kickoffPhase = 'live';
+            this.shieldEndTime = now + GOAL_SHIELD_DURATION;
+          }
+        }
+      }
+
+      collideBallWithSegment(seg) {
+        const info = distancePointToSegment(this.ballPos, seg.a, seg.b);
+        if (info.d >= BALL_RADIUS + BARRIER_THICKNESS * 0.5) return;
+
+        let nx = this.ballPos.x - info.closest.x;
+        let ny = this.ballPos.y - info.closest.y;
+        const nLen = Math.hypot(nx, ny);
+        if (nLen <= 1e-9) {
+          const dx = seg.b.x - seg.a.x;
+          const dy = seg.b.y - seg.a.y;
+          const n = normalize({ x: -dy, y: dx });
+          nx = n.x;
+          ny = n.y;
+        } else {
+          nx /= nLen;
+          ny /= nLen;
+        }
+
+        const penetration = BALL_RADIUS + BARRIER_THICKNESS * 0.5 - info.d;
+        this.ballPos.x += nx * penetration;
+        this.ballPos.y += ny * penetration;
+
+        const vn = this.ballVel.x * nx + this.ballVel.y * ny;
+        if (vn < 0) {
+          this.ballVel.x -= 1.95 * vn * nx;
+          this.ballVel.y -= 1.95 * vn * ny;
+        }
+      }
+
+      reflectOffNormal(nx, ny) {
+        const vn = this.ballVel.x * nx + this.ballVel.y * ny;
+        if (vn > 0) {
+          this.ballVel.x -= 1.95 * vn * nx;
+          this.ballVel.y -= 1.95 * vn * ny;
+        }
+      }
+
+      shieldActive(now) {
+        return now < this.shieldEndTime;
+      }
+
+      collideBallWithGoalShields(now) {
+        if (!this.shieldActive(now)) return;
+
+        const centers = [
+          { x: GOAL_LINE_X_LEFT + SHIELD_INSET_X, y: GOAL_CENTER_Y },
+          { x: GOAL_LINE_X_RIGHT - SHIELD_INSET_X, y: GOAL_CENTER_Y }
+        ];
+
+        const blockRadius = SHIELD_RADIUS + BALL_RADIUS;
+        for (const c of centers) {
+          const rx = this.ballPos.x - c.x;
+          const ry = this.ballPos.y - c.y;
+          const dist = Math.hypot(rx, ry);
+          if (dist <= 1e-6) continue;
+          if (dist < blockRadius) {
+            const nx = rx / dist;
+            const ny = ry / dist;
+            this.ballPos.x = c.x + nx * blockRadius;
+            this.ballPos.y = c.y + ny * blockRadius;
+
+            const vn = this.ballVel.x * nx + this.ballVel.y * ny;
+            if (vn < 0) {
+              this.ballVel.x -= 2.25 * vn * nx;
+              this.ballVel.y -= 2.25 * vn * ny;
+              if (now - this.lastShieldSfx > 0.08) {
+                this.soundBank.beep(760, 0.05, 0.2);
+                this.lastShieldSfx = now;
+              }
+            }
+          }
+        }
+      }
+
+      applyZoneStallNudge(dt) {
+        if (this.kickoffPhase !== 'live') {
+          this.zoneStallTimer = 0;
+          return;
+        }
+
+        const speed = Math.hypot(this.ballVel.x, this.ballVel.y);
+        const inZone = this.pointInBoostBlockZone(this.ballPos);
+        if (inZone && speed < STALL_SPEED_THRESHOLD) {
+          this.zoneStallTimer += dt;
+          if (this.zoneStallTimer >= STALL_TIME_TO_NUDGE) {
+            const isLeft = this.ballPos.x <= WIDTH * 0.5;
+            const center = isLeft
+              ? { x: GOAL_LINE_X_LEFT, y: GOAL_CENTER_Y }
+              : { x: GOAL_LINE_X_RIGHT, y: GOAL_CENTER_Y };
+            let n = normalize({ x: this.ballPos.x - center.x, y: this.ballPos.y - center.y });
+            if (n.x === 0 && n.y === 0) n = isLeft ? { x: 1, y: 0 } : { x: -1, y: 0 };
+
+            this.ballVel.x += n.x * STALL_NUDGE_IMPULSE;
+            this.ballVel.y += n.y * STALL_NUDGE_IMPULSE;
+
+            const sp = Math.hypot(this.ballVel.x, this.ballVel.y);
+            if (sp > BALL_MAX_SPEED) {
+              const s = BALL_MAX_SPEED / sp;
+              this.ballVel.x *= s;
+              this.ballVel.y *= s;
+            }
+
+            this.zoneStallTimer = 0;
+            this.soundBank.beep(710, 0.045, 0.14);
+          }
+        } else {
+          this.zoneStallTimer = 0;
+        }
+      }
+
+      onGoal(scorerRight, now) {
+        if (scorerRight) {
+          this.rightScore += 1;
+          this.startKickoff(now, 'left');
+        } else {
+          this.leftScore += 1;
+          this.startKickoff(now, 'right');
+        }
+
+        this.soundBank.beep(220, 0.23, 0.28);
+        this.clearDrawables();
+      }
+
+      handleRoundedFieldCollisionsAndGoals(now) {
+        const left = FIELD_MARGIN;
+        const right = WIDTH - FIELD_MARGIN;
+        const top = FIELD_MARGIN;
+        const bottom = HEIGHT - FIELD_MARGIN;
+        const corner = FIELD_CORNER_RADIUS;
+
+        const inGoalWindow = this.ballPos.y >= GOAL_TOP && this.ballPos.y <= GOAL_BOTTOM;
+
+        if (this.ballPos.x - BALL_RADIUS < GOAL_LINE_X_LEFT && inGoalWindow) {
+          this.onGoal(true, now);
+          return true;
+        }
+        if (this.ballPos.x + BALL_RADIUS > GOAL_LINE_X_RIGHT && inGoalWindow) {
+          this.onGoal(false, now);
+          return true;
+        }
+
+        if (this.ballPos.x >= left + corner && this.ballPos.x <= right - corner && this.ballPos.y - BALL_RADIUS < top) {
+          this.ballPos.y = top + BALL_RADIUS;
+          this.reflectOffNormal(0, -1);
+        }
+        if (this.ballPos.x >= left + corner && this.ballPos.x <= right - corner && this.ballPos.y + BALL_RADIUS > bottom) {
+          this.ballPos.y = bottom - BALL_RADIUS;
+          this.reflectOffNormal(0, 1);
+        }
+
+        if (this.ballPos.y >= top + corner && this.ballPos.y <= GOAL_TOP && this.ballPos.x - BALL_RADIUS < left) {
+          this.ballPos.x = left + BALL_RADIUS;
+          this.reflectOffNormal(-1, 0);
+        }
+        if (this.ballPos.y >= GOAL_BOTTOM && this.ballPos.y <= bottom - corner && this.ballPos.x - BALL_RADIUS < left) {
+          this.ballPos.x = left + BALL_RADIUS;
+          this.reflectOffNormal(-1, 0);
+        }
+        if (this.ballPos.y >= top + corner && this.ballPos.y <= GOAL_TOP && this.ballPos.x + BALL_RADIUS > right) {
+          this.ballPos.x = right - BALL_RADIUS;
+          this.reflectOffNormal(1, 0);
+        }
+        if (this.ballPos.y >= GOAL_BOTTOM && this.ballPos.y <= bottom - corner && this.ballPos.x + BALL_RADIUS > right) {
+          this.ballPos.x = right - BALL_RADIUS;
+          this.reflectOffNormal(1, 0);
+        }
+
+        const corners = [
+          { c: { x: left + corner, y: top + corner }, inZone: (p) => p.x < left + corner && p.y < top + corner },
+          { c: { x: right - corner, y: top + corner }, inZone: (p) => p.x > right - corner && p.y < top + corner },
+          { c: { x: left + corner, y: bottom - corner }, inZone: (p) => p.x < left + corner && p.y > bottom - corner },
+          { c: { x: right - corner, y: bottom - corner }, inZone: (p) => p.x > right - corner && p.y > bottom - corner }
+        ];
+
+        const allowed = corner - BALL_RADIUS;
+        for (const k of corners) {
+          if (!k.inZone(this.ballPos)) continue;
+          const rx = this.ballPos.x - k.c.x;
+          const ry = this.ballPos.y - k.c.y;
+          const d = Math.hypot(rx, ry);
+          if (d <= 1e-6) continue;
+          if (d > allowed) {
+            const nx = rx / d;
+            const ny = ry / d;
+            this.ballPos.x = k.c.x + nx * allowed;
+            this.ballPos.y = k.c.y + ny * allowed;
+            this.reflectOffNormal(nx, ny);
+          }
+        }
+
+        return false;
+      }
+
+      update(_, deltaMs) {
+        const dt = deltaMs / 1000;
+        const now = this.nowSec();
+
+        this.removeExpiredBarriers(now);
+
+        if (this.kickoffPhase === 'countdown') {
+          this.ballPos.x = this.halfCenterX(this.kickoffSide);
+          this.ballPos.y = GOAL_CENTER_Y;
+          this.ballVel.x = 0;
+          this.ballVel.y = 0;
+
+          const remain = Math.max(0, this.kickoffCountdownEnd - now);
+          const value = Math.ceil(remain);
+          if (value !== this.lastCountdownValue && value > 0) {
+            this.soundBank.beep(680, 0.05, 0.14);
+          }
+          this.lastCountdownValue = value;
+
+          if (now >= this.kickoffCountdownEnd) this.kickoffPhase = 'waiting_touch';
+          this.redraw(now);
+          return;
+        }
+
+        if (this.kickoffPhase === 'waiting_touch') {
+          this.ballPos.x = this.halfCenterX(this.kickoffSide);
+          this.ballPos.y = GOAL_CENTER_Y;
+          this.ballVel.x = 0;
+          this.ballVel.y = 0;
+          this.applyBoostIfCrossed(now);
+          this.redraw(now);
+          return;
+        }
+
+        this.ballPos.x += this.ballVel.x * dt;
+        this.ballPos.y += this.ballVel.y * dt;
+
+        this.ballVel.x *= BALL_DAMPING;
+        this.ballVel.y *= BALL_DAMPING;
+
+        this.applyZoneStallNudge(dt);
+
+        const speed = Math.hypot(this.ballVel.x, this.ballVel.y);
+        if (speed > BALL_MAX_SPEED) {
+          const s = BALL_MAX_SPEED / speed;
+          this.ballVel.x *= s;
+          this.ballVel.y *= s;
+        }
+
+        this.collideBallWithGoalShields(now);
+
+        if (!this.handleRoundedFieldCollisionsAndGoals(now)) {
+          this.applyBoostIfCrossed(now);
+          for (const seg of this.barriers) this.collideBallWithSegment(seg);
+        }
+
+        this.redraw(now);
+      }
+
+      redraw(now) {
+        this.graphics.clear();
+        this.uiGraphics.clear();
+
+        const g = this.graphics;
+
+        g.fillGradientStyle(COLORS.bgTop, COLORS.bgTop, COLORS.bgBottom, COLORS.bgBottom, 1);
+        g.fillRect(0, 0, WIDTH, HEIGHT);
+
+        g.fillStyle(COLORS.pitch, 1);
+        g.fillRoundedRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN, FIELD_CORNER_RADIUS);
+
+        g.lineStyle(2, COLORS.pitchInner, 1);
+        g.strokeRoundedRect(FIELD_MARGIN + 9, FIELD_MARGIN + 9, WIDTH - 2 * FIELD_MARGIN - 18, HEIGHT - 2 * FIELD_MARGIN - 18, FIELD_CORNER_RADIUS - 10);
+
+        g.lineStyle(3, COLORS.line, 1);
+        g.strokeRoundedRect(FIELD_MARGIN, FIELD_MARGIN, WIDTH - 2 * FIELD_MARGIN, HEIGHT - 2 * FIELD_MARGIN, FIELD_CORNER_RADIUS);
+        g.lineStyle(2, 0x96e1d7, 1);
+        g.beginPath();
+        g.moveTo(WIDTH * 0.5, FIELD_MARGIN + 12);
+        g.lineTo(WIDTH * 0.5, HEIGHT - FIELD_MARGIN - 12);
+        g.strokePath();
+        g.strokeCircle(WIDTH * 0.5, HEIGHT * 0.5, 70);
+
+        g.lineStyle(3, COLORS.goal, 1);
+        g.strokeRect(FIELD_MARGIN - GOAL_DEPTH, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
+        g.strokeRect(GOAL_LINE_X_RIGHT, GOAL_TOP, GOAL_DEPTH, GOAL_OPENING);
+        g.lineStyle(4, COLORS.goal, 1);
+        g.beginPath();
+        g.moveTo(GOAL_LINE_X_LEFT, GOAL_TOP);
+        g.lineTo(GOAL_LINE_X_LEFT, GOAL_BOTTOM);
+        g.moveTo(GOAL_LINE_X_RIGHT, GOAL_TOP);
+        g.lineTo(GOAL_LINE_X_RIGHT, GOAL_BOTTOM);
+        g.strokePath();
+
+        // Boost penalty zones: draw only the in-pitch half directly (no clip API).
+        const halfW = this.leftBlockZone.w * 0.5;
+        const leftVisible = {
+          x: GOAL_LINE_X_LEFT,
+          y: this.leftBlockZone.y,
+          w: halfW,
+          h: this.leftBlockZone.h
+        };
+        const rightVisible = {
+          x: GOAL_LINE_X_RIGHT - halfW,
+          y: this.rightBlockZone.y,
+          w: halfW,
+          h: this.rightBlockZone.h
+        };
+
+        g.fillStyle(COLORS.zoneFill, 0.42);
+        g.fillRoundedRect(leftVisible.x, leftVisible.y, leftVisible.w, leftVisible.h, leftVisible.w * 0.5);
+        g.fillRoundedRect(rightVisible.x, rightVisible.y, rightVisible.w, rightVisible.h, rightVisible.w * 0.5);
+        g.lineStyle(3, COLORS.zoneEdge, 0.95);
+        g.strokeRoundedRect(leftVisible.x, leftVisible.y, leftVisible.w, leftVisible.h, leftVisible.w * 0.5);
+        g.strokeRoundedRect(rightVisible.x, rightVisible.y, rightVisible.w, rightVisible.h, rightVisible.w * 0.5);
+
+        if (this.shieldActive(now)) {
+          g.fillStyle(COLORS.shieldFill, 0.36);
+          g.fillCircle(GOAL_LINE_X_LEFT + SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+          g.fillCircle(GOAL_LINE_X_RIGHT - SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+          g.lineStyle(4, COLORS.shieldEdge, 0.9);
+          g.strokeCircle(GOAL_LINE_X_LEFT + SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+          g.strokeCircle(GOAL_LINE_X_RIGHT - SHIELD_INSET_X, GOAL_CENTER_Y, SHIELD_RADIUS);
+        }
+
+        for (const seg of this.barriers) {
+          const alpha = clamp(1 - (now - seg.created) / BARRIER_LIFETIME, 0, 1);
+          g.lineStyle(BARRIER_THICKNESS, COLORS.barrier, alpha);
+          g.beginPath();
+          g.moveTo(seg.a.x, seg.a.y);
+          g.lineTo(seg.b.x, seg.b.y);
+          g.strokePath();
+        }
+
+        if (this.rightDrawing && this.rightLastPoint && this.input.activePointer) {
+          g.lineStyle(2, COLORS.barrier, 0.8);
+          g.beginPath();
+          g.moveTo(this.rightLastPoint.x, this.rightLastPoint.y);
+          g.lineTo(this.input.activePointer.x, this.input.activePointer.y);
+          g.strokePath();
+        }
+
+        if (this.boostPad && this.boostPad.valid) {
+          g.lineStyle(BOOST_PAD_THICKNESS, COLORS.boost, 1);
+          g.beginPath();
+          g.moveTo(this.boostPad.a.x, this.boostPad.a.y);
+          g.lineTo(this.boostPad.b.x, this.boostPad.b.y);
+          g.strokePath();
+
+          const pad = { x: this.boostPad.b.x - this.boostPad.a.x, y: this.boostPad.b.y - this.boostPad.a.y };
+          const padLen = Math.hypot(pad.x, pad.y);
+          if (padLen > 1e-6) {
+            const tangent = { x: pad.x / padLen, y: pad.y / padLen };
+            const normal = { x: -tangent.y, y: tangent.x };
+            for (let i = 1; i < 5; i++) {
+              const t = i / 5;
+              const px = Phaser.Math.Linear(this.boostPad.a.x, this.boostPad.b.x, t);
+              const py = Phaser.Math.Linear(this.boostPad.a.y, this.boostPad.b.y, t);
+              const head = { x: px + this.boostPad.dir.x * 16, y: py + this.boostPad.dir.y * 16 };
+              g.lineStyle(2, 0xbef0ff, 1);
+              g.beginPath();
+              g.moveTo(px + normal.x * 5, py + normal.y * 5);
+              g.lineTo(head.x, head.y);
+              g.moveTo(px - normal.x * 5, py - normal.y * 5);
+              g.lineTo(head.x, head.y);
+              g.strokePath();
+            }
+          }
+        }
+
+        if (this.leftDragStart && this.leftDragCurrent) {
+          const end = clampDragLine(this.leftDragStart, this.leftDragCurrent, BOOST_PAD_MAX_LENGTH);
+          g.lineStyle(2, COLORS.boostHint, 0.95);
+          g.beginPath();
+          g.moveTo(this.leftDragStart.x, this.leftDragStart.y);
+          g.lineTo(end.x, end.y);
+          g.strokePath();
+        }
+
+        g.fillStyle(0x050a0c, 0.9);
+        g.fillCircle(this.ballPos.x + 2.4, this.ballPos.y + 2.8, BALL_RADIUS + 1);
+        g.fillStyle(COLORS.ball, 1);
+        g.fillCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
+        g.lineStyle(2, COLORS.ballStroke, 1);
+        g.strokeCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
+
+        this.drawUI(now);
+      }
+
+      drawUI(now) {
+        const u = this.uiGraphics;
+
+        const topPanel = { x: WIDTH / 2 - 200, y: 10, w: 400, h: 78 };
+        const inkPanel = { x: WIDTH - 290, y: 12, w: 270, h: 82 };
+        const panels = [topPanel, inkPanel, this.playerButton];
+        for (const p of panels) {
+          u.fillStyle(COLORS.panel, 0.78);
+          u.fillRoundedRect(p.x, p.y, p.w, p.h, 12);
+          u.lineStyle(2, COLORS.panelEdge, 0.52);
+          u.strokeRoundedRect(p.x, p.y, p.w, p.h, 12);
+        }
+
+        const barX = inkPanel.x + 16;
+        const barY = inkPanel.y + 38;
+        const barW = inkPanel.w - 32;
+        const barH = 22;
+
+        u.fillStyle(0x233442, 1);
+        u.fillRoundedRect(barX, barY, barW, barH, 8);
+
+        const remaining = clamp((MAX_INK_LENGTH - this.inkUsed) / MAX_INK_LENGTH, 0, 1);
+        const fillW = Math.floor((barW - 4) * remaining);
+        u.fillStyle(COLORS.barrier, 1);
+        u.fillRoundedRect(barX + 2, barY + 2, fillW, barH - 4, 6);
+        u.lineStyle(2, 0xa0d2e6, 1);
+        u.strokeRoundedRect(barX, barY, barW, barH, 8);
+
+        this.playerText.setText(`Control: ${this.userSide === 'left' ? 'Player 1 (Left)' : 'Player 2 (Right)'}`);
+        this.scoreText.setText(`${this.leftScore} : ${this.rightScore}`);
+        this.inkPct.setText(`${Math.floor(remaining * 100)}%`);
+
+        if (this.kickoffPhase === 'countdown') {
+          const remain = Math.max(0, this.kickoffCountdownEnd - now);
+          const v = Math.max(1, Math.ceil(remain));
+          this.kickoffText.setText(String(v));
+          this.kickoffText.setVisible(true);
+        } else if (this.kickoffPhase === 'waiting_touch') {
+          this.kickoffText.setText('GO');
+          this.kickoffText.setVisible(true);
+        } else {
+          this.kickoffText.setVisible(false);
+        }
+
+        if (this.shieldActive(now)) {
+          const sec = Math.max(0, this.shieldEndTime - now);
+          this.shieldText.setText(`GOAL SHIELDS ${sec.toFixed(1)}s`);
+          this.shieldText.setVisible(true);
+        } else {
+          this.shieldText.setVisible(false);
+        }
+      }
+    }
+
+    const config = {
+      type: Phaser.WEBGL,
+      width: WIDTH,
+      height: HEIGHT,
+      backgroundColor: '#070c14',
+      parent: 'game',
+      scene: [InkSoccerScene]
+    };
+
+    new Phaser.Game(config);
+  </script>
+</body>
+</html>
