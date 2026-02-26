@@ -141,6 +141,7 @@
         this.shieldText = this.add.text(WIDTH / 2, 98, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#ffbe74' }).setOrigin(0.5);
         this.hintText = this.add.text(WIDTH / 2, HEIGHT - 20, 'L-drag: boost  R-drag: wall  R: reset', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' }).setOrigin(0.5);
         this.netHintText = this.add.text(WIDTH / 2, 90, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '16px', color: '#9cc2d6' }).setOrigin(0.5);
+        this.roomText = this.add.text(WIDTH / 2, 112, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '14px', color: '#7fa8bf' }).setOrigin(0.5);
 
         this.inkLabel = this.add.text(WIDTH - 274, 22, 'INK', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' });
         this.inkPct = this.add.text(WIDTH - 34, 66, '100%', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#e4f4ff' }).setOrigin(1, 0);
@@ -273,12 +274,8 @@
           if (role === "join") {
             this.net.connectTimer = setTimeout(() => {
               if (!this.connectionOpen && this.net.ws === ws) {
-                this.status("No host found. Claiming room as host...");
-                try { ws.close(); } catch {}
-                this.net.host = true;
-                this.playerSide = "left";
-                this.isAuthoritative = true;
-                connectRoom(room, "host");
+                this.status("Join timeout. Host not reachable for this room.");
+                this.transportStatus("ws timeout");
               }
             }, 10000);
           }
@@ -777,6 +774,7 @@
         }
         this.inkPct.setText(`${Math.floor(rem * 100)}%`);
         this.netHintText.setText(this.connectionOpen ? 'Them joined' : 'Waiting for them to join...');
+        this.roomText.setText(`Room ${this.net.roomCode || '-'} | ${this.net.host ? 'Host' : 'Join'}`);
 
         if (this.kickoffPhase === 'countdown') {
           this.kickText.setText(String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now))));
