@@ -15,11 +15,105 @@
       color: #e4f4ff;
     }
     #game {
-      width: 100vw;
-      height: 100vh;
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+    #hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 6px 14px 8px;
+      box-sizing: border-box;
+      color: #e4f4ff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+    }
+    #hudTop {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    #hudScoreWrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(10,24,35,0.72);
+      border: 1px solid rgba(84,186,220,0.48);
+      border-radius: 10px;
+      padding: 4px 10px;
+      min-width: 320px;
+      justify-content: center;
+    }
+    #hudScore {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 1px;
+      min-width: 110px;
+      text-align: center;
+    }
+    .hudTag {
+      font-size: 13px;
+      font-weight: 700;
+      color: #9cc2d6;
+      min-width: 78px;
+      text-align: center;
+    }
+    #hudInkWrap {
+      background: rgba(10,24,35,0.72);
+      border: 1px solid rgba(84,186,220,0.48);
+      border-radius: 10px;
+      padding: 4px 8px;
+      min-width: 220px;
+    }
+    #hudInkLabel {
+      font-size: 12px;
+      color: #96bed2;
+      margin-bottom: 3px;
+    }
+    #hudInkBar {
+      height: 12px;
+      border-radius: 8px;
+      border: 1px solid #a0d2e6;
+      background: #233442;
+      overflow: hidden;
+      position: relative;
+    }
+    #hudInkFill {
+      height: 100%;
+      width: 100%;
+      border-radius: 8px;
+      background: #ff6e80;
+    }
+    #hudInkPct {
+      position: absolute;
+      right: 6px;
+      top: -1px;
+      font-size: 12px;
+      color: #e4f4ff;
+    }
+    #hudBottom {
+      text-align: center;
+      margin-bottom: 2px;
+    }
+    #hudNetHint {
+      font-size: 13px;
+      color: #9cc2d6;
+      line-height: 1.2;
+    }
+    #hudRoom {
+      font-size: 12px;
+      color: #7fa8bf;
+      line-height: 1.2;
     }
     canvas {
       display: block;
@@ -32,6 +126,23 @@
 </head>
 <body>
   <div id="game"></div>
+  <div id="hud">
+    <div id="hudTop">
+      <div id="hudScoreWrap">
+        <div id="hudLeftTag" class="hudTag">Me</div>
+        <div id="hudScore">0 : 0</div>
+        <div id="hudRightTag" class="hudTag">Opponent</div>
+      </div>
+      <div id="hudInkWrap">
+        <div id="hudInkLabel">INK</div>
+        <div id="hudInkBar"><div id="hudInkFill"></div><div id="hudInkPct">100%</div></div>
+      </div>
+    </div>
+    <div id="hudBottom">
+      <div id="hudNetHint">Waiting for opponent...</div>
+      <div id="hudRoom">Room -</div>
+    </div>
+  </div>
 
   <script>
     const WIDTH = 1100;
@@ -179,8 +290,18 @@
         this.inkLabel = this.add.text(WIDTH - 254, 7, 'INK', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' });
         this.inkPct = this.add.text(WIDTH - 28, 6, '100%', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '14px', color: '#e4f4ff' }).setOrigin(1, 0);
 
-        const hudTexts = [this.scoreText, this.leftTagText, this.rightTagText, this.kickText, this.shieldText, this.hintText, this.netHintText, this.roomText, this.inkLabel, this.inkPct];
-        for (const t of hudTexts) t.setResolution(RENDER_RESOLUTION);
+        const hudTexts = [this.scoreText, this.leftTagText, this.rightTagText, this.netHintText, this.roomText, this.inkLabel, this.inkPct];
+        for (const t of hudTexts) { t.setResolution(RENDER_RESOLUTION); t.setVisible(false); }
+
+        this.hud = {
+          score: document.getElementById('hudScore'),
+          leftTag: document.getElementById('hudLeftTag'),
+          rightTag: document.getElementById('hudRightTag'),
+          netHint: document.getElementById('hudNetHint'),
+          room: document.getElementById('hudRoom'),
+          inkFill: document.getElementById('hudInkFill'),
+          inkPct: document.getElementById('hudInkPct')
+        };
 
         this.initAudio();
 
@@ -854,34 +975,25 @@
         g.fillStyle(COLORS.ball, 1); g.fillCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
         g.lineStyle(2, COLORS.ballStroke, 1); g.strokeCircle(this.ballPos.x, this.ballPos.y, BALL_RADIUS);
 
-        const top = { x: WIDTH / 2 - 190, y: 4, w: 380, h: 34 };
-        const ink = { x: WIDTH - 270, y: 4, w: 250, h: 34 };
-        for (const p of [top, ink]) {
-          u.fillStyle(COLORS.panel, 0.78); u.fillRoundedRect(p.x, p.y, p.w, p.h, 12);
-          u.lineStyle(2, COLORS.panelEdge, 0.52); u.strokeRoundedRect(p.x, p.y, p.w, p.h, 12);
-        }
-
-        const barX = ink.x + 14, barY = ink.y + 12, barW = ink.w - 28, barH = 16;
-        u.fillStyle(0x233442, 1); u.fillRoundedRect(barX, barY, barW, barH, 8);
         const myInkUsed = this.inkUsed[this.playerSide] || 0;
         const rem = clamp((MAX_INK_LENGTH - myInkUsed) / MAX_INK_LENGTH, 0, 1);
-        const myBarrierColor = this.playerSide === "right" ? COLORS.barrierRight : COLORS.barrierLeft;
-        u.fillStyle(myBarrierColor, 1); u.fillRoundedRect(barX + 2, barY + 2, Math.floor((barW - 4) * rem), barH - 4, 6);
-        u.lineStyle(2, 0xa0d2e6, 1); u.strokeRoundedRect(barX, barY, barW, barH, 8);
+        const myBarrierColor = this.playerSide === "right" ? '#5aa9ff' : '#ff6e80';
 
-        this.scoreText.setText(`${this.leftScore} : ${this.rightScore}`);
+        this.hud.score.textContent = `${this.leftScore} : ${this.rightScore}`;
         const dots = '.'.repeat((Math.floor(now * 2) % 3) + 1);
-        const themText = this.connectionOpen ? 'Opponent' : `Opponent${dots}`;
+        const oppText = this.connectionOpen ? 'Opponent' : `Opponent${dots}`;
         if (this.playerSide === 'left') {
-          this.leftTagText.setText('Me');
-          this.rightTagText.setText(themText);
+          this.hud.leftTag.textContent = 'Me';
+          this.hud.rightTag.textContent = oppText;
         } else {
-          this.leftTagText.setText(themText);
-          this.rightTagText.setText('Me');
+          this.hud.leftTag.textContent = oppText;
+          this.hud.rightTag.textContent = 'Me';
         }
-        this.inkPct.setText(`${Math.floor(rem * 100)}%`);
-        this.netHintText.setText(this.connectionOpen ? 'Opponent joined' : 'Waiting for opponent...');
-        this.roomText.setText(`Room ${this.net.roomCode || '-'} | ${this.net.host ? 'Host' : 'Join'}`);
+        this.hud.inkPct.textContent = `${Math.floor(rem * 100)}%`;
+        this.hud.inkFill.style.width = `${Math.floor(rem * 100)}%`;
+        this.hud.inkFill.style.background = myBarrierColor;
+        this.hud.netHint.textContent = this.connectionOpen ? 'Opponent joined' : 'Waiting for opponent...';
+        this.hud.room.textContent = `Room ${this.net.roomCode || '-'} | ${this.net.host ? 'Host' : 'Join'}`;
 
         if (this.kickoffPhase === 'countdown') {
           this.kickText.setText(String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now))));
