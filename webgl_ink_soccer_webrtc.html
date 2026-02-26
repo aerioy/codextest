@@ -28,66 +28,11 @@
       max-width: none;
       max-height: none;
     }
-    #net {
-      position: fixed;
-      right: 12px;
-      bottom: 12px;
-      width: min(430px, 92vw);
-      background: rgba(10, 24, 35, 0.92);
-      border: 2px solid rgba(84, 186, 220, 0.52);
-      border-radius: 12px;
-      padding: 10px;
-      backdrop-filter: blur(6px);
-      z-index: 10;
-      font-size: 13px;
-    }
-    #net textarea {
-      width: 100%;
-      height: 72px;
-      resize: vertical;
-      border-radius: 8px;
-      border: 1px solid rgba(130, 170, 190, 0.7);
-      background: rgba(4, 10, 14, 0.8);
-      color: #d8f0ff;
-      margin-top: 6px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
-      padding: 6px;
-      box-sizing: border-box;
-    }
-    #net .row {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      margin-top: 6px;
-    }
-    #net button {
-      border: 1px solid rgba(120, 180, 210, 0.8);
-      background: rgba(21, 45, 62, 0.9);
-      color: #d7f1ff;
-      border-radius: 8px;
-      padding: 6px 8px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    #net .muted { color: #9cc2d6; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
 </head>
 <body>
   <div id="game"></div>
-  <div id="net">
-    <div><strong>Managed Multiplayer</strong> <span id="role" class="muted">(not connected)</span></div>
-    <div class="row">
-      <button id="hostBtn">Create Room (Player 1 Left)</button>
-      <input id="roomCode" placeholder="Room code" style="flex:1;min-width:120px;border-radius:8px;border:1px solid rgba(130,170,190,0.7);background:rgba(4,10,14,0.8);color:#d8f0ff;padding:6px 8px;">
-      <button id="joinBtn">Join (Player 2 Right)</button>
-      <button id="copyRoomBtn">Copy Invite URL</button>
-    </div>
-    <div class="muted" id="roomInfo" style="margin-top:6px">No room yet.</div>
-    <div id="status" class="muted" style="margin-top:6px">Disconnected</div>
-    <div id="iceInfo" class="muted" style="margin-top:4px">Transport: idle</div>
-  </div>
 
   <script>
     const WIDTH = 1100;
@@ -236,18 +181,13 @@
         this.input.keyboard.on('keydown-R', () => this.handleReset(this.playerSide));
       }
 
-      status(msg) { document.getElementById('status').textContent = msg; }
+      status(msg) { this.netStatus = msg; }
 
-      transportStatus(msg) { document.getElementById('iceInfo').textContent = "Transport: " + msg; }
+      transportStatus(msg) { this.netTransport = msg; }
 
       setupNetUI() {
-        const roleEl = document.getElementById("role");
-        const roomInput = document.getElementById("roomCode");
-        const roomInfo = document.getElementById("roomInfo");
-
         const params = new URLSearchParams(window.location.search);
         const presetRoom = (params.get("room") || "").trim().toUpperCase();
-        if (presetRoom) roomInput.value = presetRoom;
 
         const makeRoomCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
         const wsBase = (() => {
@@ -299,17 +239,10 @@
               this.net.host = isHost;
               this.playerSide = isHost ? "left" : "right";
               this.isAuthoritative = isHost;
-              roleEl.textContent = isHost ? "(Host / Player 1 Left)" : "(Join / Player 2 Right)";
               this.net.roomCode = m.room || room;
-              roomInput.value = this.net.roomCode;
-              const inviteUrl = window.location.origin + window.location.pathname + "?room=" + this.net.roomCode;
-              this.net.inviteUrl = inviteUrl;
-              roomInfo.textContent = "Room: " + this.net.roomCode + " | Share URL with Player 2";
-              if (isHost) {
-                this.status("Room created. Waiting for Player 2...");
-              } else {
-                this.status("Connected to room. Waiting for host sync...");
-              }
+              this.net.inviteUrl = window.location.origin + window.location.pathname + "?room=" + this.net.roomCode;
+              if (isHost) this.status("Room created. Waiting for Player 2...");
+              else this.status("Connected to room. Waiting for host sync...");
               return;
             }
 
@@ -349,52 +282,25 @@
           bindSocket(ws, role, room);
         };
 
-        const startHost = () => {
-          teardown();
-          const room = makeRoomCode();
+        teardown();
+        const room = presetRoom || makeRoomCode();
+        if (!presetRoom) {
+          const url = window.location.origin + window.location.pathname + "?room=" + room;
+          history.replaceState(null, "", url);
+          this.net.inviteUrl = url;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(() => this.status("Invite URL copied"))
+              .catch(() => this.status("Invite URL ready"));
+          }
           this.net.host = true;
-          this.net.roomCode = room;
           this.playerSide = "left";
           this.isAuthoritative = true;
-          roleEl.textContent = "(Host / Player 1 Left)";
-          roomInfo.textContent = "Room: " + room + " | Share URL with Player 2";
-          roomInput.value = room;
-          this.net.inviteUrl = window.location.origin + window.location.pathname + "?room=" + room;
-          this.status("Creating room...");
           connectRoom(room, "host");
-        };
-
-        const startJoin = () => {
-          const room = (roomInput.value || "").trim().toUpperCase();
-          if (!room) {
-            this.status("Enter a room code first");
-            return;
-          }
-          teardown();
+        } else {
           this.net.host = false;
-          this.net.roomCode = room;
           this.playerSide = "right";
           this.isAuthoritative = false;
-          roleEl.textContent = "(Join / Player 2 Right)";
-          roomInfo.textContent = "Joining room: " + room;
-          this.status("Connecting to host...");
           connectRoom(room, "join");
-        };
-
-        document.getElementById("hostBtn").onclick = startHost;
-        document.getElementById("joinBtn").onclick = startJoin;
-
-        document.getElementById("copyRoomBtn").onclick = async () => {
-          if (!this.net.inviteUrl) {
-            this.status("Create room first");
-            return;
-          }
-          await navigator.clipboard.writeText(this.net.inviteUrl);
-          this.status("Invite URL copied");
-        };
-
-        if (presetRoom) {
-          roomInfo.textContent = "Room preset from URL: " + presetRoom;
         }
       }
 
