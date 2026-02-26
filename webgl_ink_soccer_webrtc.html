@@ -87,6 +87,7 @@
     </div>
     <div class="muted" id="roomInfo" style="margin-top:6px">No room yet.</div>
     <div id="status" class="muted" style="margin-top:6px">Disconnected</div>
+    <div id="iceInfo" class="muted" style="margin-top:4px">ICE: idle</div>
   </div>
 
   <script>
@@ -222,7 +223,7 @@
           right:{ lStart: null, lCur: null, rDraw: false, rLast: null, pointer: { x: 0, y: 0 } }
         };
 
-        this.net = { peer: null, conn: null, host: false, roomCode: "", lastStateTx: 0 };
+        this.net = { peer: null, conn: null, host: false, roomCode: "", lastStateTx: 0, iceTimer: null };
         this.setupNetUI();
 
         this.startKickoff(this.now(), 'left');
@@ -235,6 +236,64 @@
       }
 
       status(msg) { document.getElementById('status').textContent = msg; }
+
+      iceStatus(msg) { document.getElementById('iceInfo').textContent = "ICE: " + msg; }
+
+      clearIceMonitor() {
+        if (this.net.iceTimer) {
+          clearInterval(this.net.iceTimer);
+          this.net.iceTimer = null;
+        }
+        this.iceStatus("idle");
+      }
+
+      startIceMonitor(conn) {
+        this.clearIceMonitor();
+        const pc = conn.peerConnection || (conn._negotiator && conn._negotiator._pc);
+        if (!pc || typeof pc.getStats !== "function") {
+          this.iceStatus("unavailable");
+          return;
+        }
+
+        const update = async () => {
+          try {
+            const stats = await pc.getStats();
+            const byId = new Map();
+            stats.forEach((r) => byId.set(r.id, r));
+
+            let pair = null;
+            stats.forEach((r) => {
+              if (r.type === "transport" && r.selectedCandidatePairId && byId.has(r.selectedCandidatePairId)) {
+                pair = byId.get(r.selectedCandidatePairId);
+              }
+            });
+            if (!pair) {
+              stats.forEach((r) => {
+                if (r.type === "candidate-pair" && (r.selected || (r.nominated && r.state === "succeeded"))) {
+                  pair = r;
+                }
+              });
+            }
+
+            let ctype = "unknown";
+            if (pair && pair.localCandidateId && byId.has(pair.localCandidateId)) {
+              const local = byId.get(pair.localCandidateId);
+              ctype = local.candidateType || "unknown";
+            }
+            const iceState = pc.iceConnectionState || "new";
+            this.iceStatus(`${iceState} | path: ${ctype}`);
+          } catch {
+            this.iceStatus("stats error");
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          this.iceStatus((pc.iceConnectionState || "new") + " | path: ...");
+        };
+
+        update();
+        this.net.iceTimer = setInterval(update, 1500);
+      }
 
       setupNetUI() {
         const roleEl = document.getElementById("role");
@@ -269,6 +328,7 @@
           this.net.conn = null;
           this.net.peer = null;
           this.connectionOpen = false;
+          this.clearIceMonitor();
         };
 
         const bindConn = (conn) => {
@@ -276,10 +336,12 @@
           conn.on("open", () => {
             this.connectionOpen = true;
             this.status("Connected");
+            this.startIceMonitor(conn);
           });
           conn.on("close", () => {
             this.connectionOpen = false;
             this.status("Disconnected");
+            this.clearIceMonitor();
           });
           conn.on("error", (err) => this.status("Conn error: " + (err && err.message ? err.message : err)));
           conn.on("data", (data) => this.onNetMessage(typeof data === "string" ? data : JSON.stringify(data)));
