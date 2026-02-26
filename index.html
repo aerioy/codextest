@@ -140,6 +140,7 @@
         this.kickText = this.add.text(WIDTH / 2, HEIGHT / 2 - 140, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '34px', color: '#a0f0ff', fontStyle: '700' }).setOrigin(0.5);
         this.shieldText = this.add.text(WIDTH / 2, 98, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#ffbe74' }).setOrigin(0.5);
         this.hintText = this.add.text(WIDTH / 2, HEIGHT - 20, 'L-drag: boost  R-drag: wall  R: reset', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' }).setOrigin(0.5);
+        this.netHintText = this.add.text(WIDTH / 2, 90, '', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '16px', color: '#9cc2d6' }).setOrigin(0.5);
 
         this.inkLabel = this.add.text(WIDTH - 274, 22, 'INK', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '18px', color: '#96bed2' });
         this.inkPct = this.add.text(WIDTH - 34, 66, '100%', { fontFamily: 'Avenir Next, Segoe UI', fontSize: '17px', color: '#e4f4ff' }).setOrigin(1, 0);
@@ -312,7 +313,7 @@
       }
 
       send(msg) {
-        if (!this.net.ws || this.net.ws.readyState !== WebSocket.OPEN || !this.connectionOpen) return;
+        if (!this.net.ws || this.net.ws.readyState !== WebSocket.OPEN) return;
         this.net.ws.send(msg);
       }
 
@@ -321,11 +322,13 @@
         try { m = JSON.parse(raw); } catch { return; }
 
         if (m.t === 'input' && this.isAuthoritative) {
+          this.connectionOpen = true;
           this.applyInputEvent('right', m.e);
           return;
         }
 
         if (m.t === 'state' && !this.isAuthoritative) {
+          this.connectionOpen = true;
           const s = m.s;
           this.leftScore = s.leftScore; this.rightScore = s.rightScore;
           this.ballPos = s.ballPos; this.ballVel = s.ballVel;
@@ -673,7 +676,7 @@
             }
           }
 
-          if (this.connectionOpen && now - this.net.lastStateTx > 0.05) {
+          if (this.net.ws && this.net.ws.readyState === WebSocket.OPEN && now - this.net.lastStateTx > 0.05) {
             this.send({ t: 'state', s: this.serializeState(now) });
             this.net.lastStateTx = now;
           }
@@ -773,6 +776,7 @@
           this.rightTagText.setText('Me');
         }
         this.inkPct.setText(`${Math.floor(rem * 100)}%`);
+        this.netHintText.setText(this.connectionOpen ? 'Them joined' : 'Waiting for them to join...');
 
         if (this.kickoffPhase === 'countdown') {
           this.kickText.setText(String(Math.max(1, Math.ceil(this.kickoffCountdownEnd - now))));
